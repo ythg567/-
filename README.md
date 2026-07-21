@@ -41,35 +41,41 @@ npm run build
 
 构建产物输出到 `dist/` 目录。你可以将 `dist/` 部署到任意静态服务器（如 Vercel、GitHub Pages、Nginx 等）。
 
-## 永久部署（免费 · GitHub Pages，推荐）
+## 已上线（本仓库）
 
-仓库已内置 GitHub Actions 工作流（`.github/workflows/deploy.yml`），每次 `git push` 到 `main` 分支都会自动构建并发布到 GitHub Pages，得到一个**永久免费**的 HTTPS 地址。
+代码已推送到 GitHub，并启用了 GitHub Pages：
 
-### 第一步：在 GitHub 新建一个空仓库
+- 仓库地址：https://github.com/ythg567/-
+- **插件永久地址（飞书里填这个）**：**https://ythg567.github.io/-/**
+- 分支说明：
+  - `main`：源代码（16 个源文件）
+  - `gh-pages`：构建产物（`dist/`），GitHub Pages 直接托管此分支
 
-在 https://github.com/new 创建一个仓库（例如 `feishu-bitable-downloader`），**不要**勾选初始化 README / .gitignore。
+> 把 `https://ythg567.github.io/-/` 填到飞书多维表格 → 扩展脚本/插件 → 自定义插件 → 运行地址即可。
 
-### 第二步：推送代码
+### 如何更新插件（改完代码后）
+
+本仓库的 Pages 采用「从分支部署」（`gh-pages` 分支），所以更新只需把最新构建产物推到 `gh-pages`：
 
 ```bash
-cd feishu-bitable-attachment-downloader
-git remote add origin https://github.com/你的用户名/feishu-bitable-downloader.git
-git branch -M main
-git push -u origin main
+npm run build
+# 在你本地（能正常访问 github.com 的环境）执行：
+git subtree push --prefix dist origin gh-pages
 ```
 
-### 第三步：开启 Pages
+> 提示：本仓库名是 `-`（创建时随手起的）。如需改名，在 GitHub 仓库 **Settings → Options → Rename** 修改，改名后 Pages 地址会变为 `https://ythg567.github.io/新名字/`。
 
-1. 进入仓库 **Settings → Pages**。
-2. Source 选择 **GitHub Actions**。
-3. 等待 Actions 跑完（约 1 分钟），页面会显示发布地址，形如：
-   ```
-   https://你的用户名.github.io/feishu-bitable-downloader/
-   ```
+### 关于 .github 工作流（可选）
 
-把这个地址填到飞书自定义插件的运行地址即可。之后改代码只要 `git push`，URL 永久不变。
+仓库内置了 `.github/workflows/deploy.yml`（CI 自动构建发布）。由于 GitHub 的 API 对 `.github` 目录的程序化创建有访问限制，该文件**未通过脚本推送**，仍在本地仓库中。若你想启用「push 即自动部署」：
 
-> 提示：临时演示用的 CloudStudio 沙箱地址随时可能被回收，不建议长期使用。GitHub Pages 地址长期稳定。
+1. 在 GitHub 网页端进入仓库，点 **Add file → Create new file**。
+2. 路径填 `.github/workflows/deploy.yml`，把本地同名文件内容粘贴进去提交。
+3. 进入 **Settings → Pages**，把 Source 从 `Deploy from a branch` 改为 **GitHub Actions**。
+
+不启用也完全不影响使用——手动 `git subtree push --prefix dist origin gh-pages` 更新即可。
+
+> 旧版说明（CloudStudio 临时沙箱地址）已弃用，请以本仓库 GitHub Pages 地址为准。
 
 ## 永久部署（国内快 · 码云 Gitee Pages）
 
