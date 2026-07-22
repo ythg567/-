@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   useBitable,
   IFieldMeta,
@@ -7,6 +7,7 @@ import {
   SUPPORT_TEXT_TYPES,
   FieldType
 } from './hooks/useBitable'
+import { usePresets, FormState } from './hooks/usePresets'
 import {
   AttachmentDownloader,
   DownloadConfig,
@@ -74,20 +75,6 @@ const Icons = {
 
 type Tab = 'download' | 'my'
 
-interface FormState {
-  tableId: string
-  viewId: string
-  attachmentFieldIds: string[]
-  urlFieldId: string
-  fileNameType: 'original' | 'field'
-  fileNameFieldIds: string[]
-  nameDelimiter: string
-  downloadMode: 'zip' | 'individual'
-  folderClassification: boolean
-  firstFolderFieldId: string
-  secondFolderFieldId: string
-}
-
 const defaultForm: FormState = {
   tableId: '',
   viewId: '',
@@ -127,6 +114,19 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('download')
   const [form, setForm] = useState<FormState>(defaultForm)
   const [advancedOpen, setAdvancedOpen] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const {
+    presets,
+    selectedId,
+    setSelectedId,
+    saveNew,
+    overwrite,
+    remove,
+    loadPreset,
+    importFromJson,
+    exportJson
+  } = usePresets(form)
   const [isDownloading, setIsDownloading] = useState(false)
   const [progressOpen, setProgressOpen] = useState(false)
   const [progress, setProgress] = useState({
@@ -184,6 +184,89 @@ export default function App() {
 
   const updateForm = <K extends keyof FormState>(key: K, value: FormState[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }))
+  }
+
+  const handlePresetSelect = (id: string) => {
+    setSelectedId(id)
+    if (!id) return
+    const saved = loadPreset(id)
+    if (saved) {
+      setForm(saved)
+      showToast('已加载预设配置', 'info')
+    }
+  }
+
+  const handleSaveNewPreset = () => {
+    const name = window.prompt('请输入新预设名称：', `预设 ${presets.length + 1}`)
+    if (!name || !name.trim()) return
+    saveNew(name.trim())
+    showToast('已保存为新预设', 'success')
+  }
+
+  const handleOverwritePreset = () => {
+    if (!selectedId) {
+      showToast('请先选择一个预设', 'warning')
+      return
+    }
+    const preset = presets.find((p) => p.id === selectedId)
+    if (!preset) return
+    if (window.confirm(`确定用当前配置覆盖预设「${preset.name}」吗？`)) {
+      overwrite(selectedId)
+      showToast('已覆盖所选预设', 'success')
+    }
+  }
+
+  const handleDeletePreset = () => {
+    if (!selectedId) {
+      showToast('请先选择一个预设', 'warning')
+      return
+    }
+    const preset = presets.find((p) => p.id === selectedId)
+    if (!preset) return
+    if (window.confirm(`确定删除预设「${preset.name}」吗？`)) {
+      remove(selectedId)
+      showToast('已删除所选预设', 'success')
+    }
+  }
+
+  const handleExportPresets = () => {
+    if (presets.length === 0) {
+      showToast('当前没有可导出的预设', 'warning')
+      return
+    }
+    const blob = new Blob([exportJson()], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `feishu-bitable-presets-${new Date().toISOString().slice(0, 10)}.json`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    showToast('预设已导出', 'success')
+  }
+
+  const handleImportClick = () => {
+    fileInputRef.current?.click()
+  }
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    try {
+      const text = await file.text()
+      const result = importFromJson(text)
+      if (result.ok) {
+        showToast(`成功导入 ${result.count} 个预设`, 'success')
+      } else {
+        showToast(result.error, 'warning')
+      }
+    } catch (err: any) {
+      showToast(`导入失败：${err.message || '未知错误'}`, 'warning')
+    } finally {
+      // reset input so the same file can be re-selected
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
   }
 
   const validate = (): string | null => {
@@ -322,17 +405,67 @@ export default function App() {
                 <span className="preset-flag">{Icons.flag}</span>
                 配置预设
               </span>
-              <select className="preset-select" disabled>
-                <option>选择配置预设</option>
+              <select
+                className="preset-select"
+                value={selectedId}
+                onChange={(e) => handlePresetSelect(e.target.value)}
+              >
+                <option value="">选择配置预设</option>
+                {presets.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
               </select>
               <div className="preset-actions">
-                <button title="保存" disabled>{Icons.save}</button>
-                <button title="编辑" disabled>{Icons.edit}</button>
-                <button title="下载配置" disabled>{Icons.download2}</button>
-                <button title="上传配置" disabled>{Icons.upload}</button>
-                <button title="删除" disabled className="danger">{Icons.delete}</button>
+                <button
+                  type="button"
+                  data-tip="保存当前配置为新预设"
+                  onClick={handleSaveNewPreset}
+                >
+                  {Icons.save}
+                </button>
+                <button
+                  type="button"
+                  data-tip="用当前配置覆盖所选预设"
+                  onClick={handleOverwritePreset}
+                  disabled={!selectedId}
+                >
+                  {Icons.edit}
+                </button>
+                <button
+                  type="button"
+                  data-tip="从 JSON 文件导入预设"
+                  onClick={handleImportClick}
+                >
+                  {Icons.upload}
+                </button>
+                <button
+                  type="button"
+                  data-tip="导出预设"
+                  onClick={handleExportPresets}
+                  disabled={presets.length === 0}
+                >
+                  {Icons.download2}
+                </button>
+                <button
+                  type="button"
+                  data-tip="删除所选预设"
+                  onClick={handleDeletePreset}
+                  disabled={!selectedId}
+                  className="danger"
+                >
+                  {Icons.delete}
+                </button>
               </div>
             </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="application/json,.json"
+              style={{ display: 'none' }}
+              onChange={handleImportFile}
+            />
           </div>
 
           {/* 基础配置 */}

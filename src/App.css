@@ -163,13 +163,57 @@ body {
   border-radius: 6px;
   background: transparent;
   color: #646a73;
-  cursor: not-allowed;
-  opacity: 0.55;
+  cursor: pointer;
+  opacity: 1;
   transition: all 0.2s;
+  position: relative;
+}
+
+.preset-actions button:hover:not(:disabled) {
+  background: #f2f3f5;
+  color: #1f2329;
+}
+
+.preset-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
 }
 
 .preset-actions button.danger {
   color: #f54a45;
+}
+
+.preset-actions button.danger:hover:not(:disabled) {
+  background: #fff2f0;
+  color: #d83931;
+}
+
+/* Tooltip */
+[data-tip] {
+  position: relative;
+}
+
+[data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 5px 8px;
+  background: #1f2329;
+  color: #fff;
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+  border-radius: 4px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s;
+  z-index: 20;
+}
+
+[data-tip]:hover::after {
+  opacity: 1;
 }
 
 /* Form row: label + control */
