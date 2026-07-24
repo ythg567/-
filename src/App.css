@@ -17,6 +17,48 @@ body {
   flex-direction: column;
 }
 
+/* Header */
+.plugin-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: #fff;
+  border-bottom: 1px solid #dee0e3;
+}
+
+.plugin-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #1f2329;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.header-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #646a73;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.header-actions button:hover {
+  background: #f2f3f5;
+  color: #1f2329;
+}
+
 .center {
   align-items: center;
   justify-content: center;
@@ -437,6 +479,125 @@ input:disabled {
 .btn-icon {
   display: inline-flex;
   align-items: center;
+}
+
+/* Tag selector */
+.tag-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tag-box {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 5px 8px;
+  border: 1px solid #dee0e3;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.tag-placeholder {
+  color: #8f959e;
+  font-size: 13px;
+}
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  background: #f2f3f5;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #1f2329;
+}
+
+.tag-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #8f959e;
+  cursor: pointer;
+  border-radius: 50%;
+}
+
+.tag-remove:hover {
+  background: #e5e6eb;
+  color: #1f2329;
+}
+
+.tag-add {
+  width: auto;
+  min-width: 80px;
+  padding: 6px 10px;
+  border: 1px solid #dee0e3;
+  border-radius: 6px;
+  background: #fff;
+  color: #646a73;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.tag-add:disabled {
+  background: #f2f3f5;
+  color: #8f959e;
+  cursor: not-allowed;
+}
+
+/* Sortable list */
+.sortable-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sortable-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  background: #f5f6f7;
+  border-radius: 6px;
+  cursor: grab;
+  user-select: none;
+  transition: background 0.2s;
+}
+
+.sortable-item:hover {
+  background: #eef0f2;
+}
+
+.sortable-item.dragging {
+  opacity: 0.6;
+  background: #e5e6eb;
+}
+
+.sortable-drag {
+  display: inline-flex;
+  align-items: center;
+  color: #8f959e;
+}
+
+.sortable-name {
+  font-size: 13px;
+  color: #1f2329;
+}
+
+.sortable-empty {
+  padding: 10px;
+  color: #8f959e;
+  font-size: 13px;
+  background: #f5f6f7;
+  border-radius: 6px;
 }
 
 /* About */

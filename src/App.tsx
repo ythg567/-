@@ -16,9 +16,9 @@ import {
 
 // Inline SVG icons (no extra dependency)
 const Icons = {
-  download: (
+  cloudDownload: (
     <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
-      <path d="M12 16l-5-5h3V4h4v7h3l-5 5zm-6 2h12v2H6v-2z" />
+      <path d="M19.35 10.04A7.49 7.49 0 0012 4C9.11 4 6.6 5.64 5.35 8.04A5.994 5.994 0 000 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM17 13l-5 5-5-5h3V9h4v4h3z" />
     </svg>
   ),
   person: (
@@ -34,6 +34,16 @@ const Icons = {
   info: (
     <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
       <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z" />
+    </svg>
+  ),
+  help: (
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25z" />
+    </svg>
+  ),
+  refresh: (
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+      <path d="M17.65 6.35A7.958 7.958 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z" />
     </svg>
   ),
   save: (
@@ -61,14 +71,19 @@ const Icons = {
       <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z" />
     </svg>
   ),
+  close: (
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+      <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
+    </svg>
+  ),
+  drag: (
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+      <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z" />
+    </svg>
+  ),
   check: (
     <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
       <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
-    </svg>
-  ),
-  close: (
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
-      <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
     </svg>
   )
 }
@@ -82,6 +97,7 @@ const defaultForm: FormState = {
   urlFieldId: '',
   fileNameType: 'original',
   fileNameFieldIds: [],
+  fileNameOrderIds: [],
   nameDelimiter: '-',
   downloadMode: 'zip',
   folderClassification: false,
@@ -94,6 +110,113 @@ function Info({ tip }: { tip: string }) {
     <span className="info-icon" title={tip}>
       {Icons.info}
     </span>
+  )
+}
+
+/** Tag multi-select: show selected as removable tags + dropdown to add more */
+function TagSelector({
+  options,
+  selected,
+  onChange,
+  placeholder,
+  emptyText
+}: {
+  options: IFieldMeta[]
+  selected: string[]
+  onChange: (ids: string[]) => void
+  placeholder?: string
+  emptyText?: string
+}) {
+  const available = options.filter((o) => !selected.includes(o.id))
+  const handleSelect = (id: string) => {
+    if (!id) return
+    onChange([...selected, id])
+  }
+  const handleRemove = (id: string) => {
+    onChange(selected.filter((s) => s !== id))
+  }
+  return (
+    <div className="tag-selector">
+      <div className="tag-box">
+        {selected.length === 0 && <span className="tag-placeholder">{placeholder || '请选择'}</span>}
+        {selected.map((id) => {
+          const item = options.find((o) => o.id === id)
+          if (!item) return null
+          return (
+            <span key={id} className="tag">
+              {item.name}
+              <button type="button" className="tag-remove" onClick={() => handleRemove(id)}>
+                {Icons.close}
+              </button>
+            </span>
+          )
+        })}
+      </div>
+      <select
+        className="tag-add"
+        value=""
+        onChange={(e) => handleSelect(e.target.value)}
+        disabled={available.length === 0}
+      >
+        <option value="">{available.length === 0 ? emptyText || '无更多选项' : '+ 添加'}</option>
+        {available.map((o) => (
+          <option key={o.id} value={o.id}>
+            {o.name}
+          </option>
+        ))}
+      </select>
+    </div>
+  )
+}
+
+/** Simple drag-to-reorder list for naming order */
+function SortableList({
+  items,
+  onChange
+}: {
+  items: { id: string; name: string }[]
+  onChange: (ids: string[]) => void
+}) {
+  const [dragIndex, setDragIndex] = useState<number | null>(null)
+
+  const handleDragStart = (idx: number) => {
+    setDragIndex(idx)
+  }
+
+  const handleDragOver = (e: React.DragEvent, idx: number) => {
+    e.preventDefault()
+    if (dragIndex === null || dragIndex === idx) return
+    const next = [...items]
+    const [removed] = next.splice(dragIndex, 1)
+    next.splice(idx, 0, removed)
+    setDragIndex(idx)
+    onChange(next.map((i) => i.id))
+  }
+
+  const handleDragEnd = () => {
+    setDragIndex(null)
+  }
+
+  if (items.length === 0) {
+    return <div className="sortable-empty">请在上方字段列中选择字段</div>
+  }
+
+  return (
+    <div className="sortable-list">
+      {items.map((item, idx) => (
+        <div
+          key={item.id}
+          className={`sortable-item ${dragIndex === idx ? 'dragging' : ''}`}
+          draggable
+          onDragStart={() => handleDragStart(idx)}
+          onDragOver={(e) => handleDragOver(e, idx)}
+          onDragEnd={handleDragEnd}
+        >
+          <span className="sortable-drag">{Icons.drag}</span>
+          <span className="sortable-name">{item.name}</span>
+        </div>
+      ))}
+    </div>
   )
 }
 
@@ -158,6 +281,13 @@ export default function App() {
     [fields]
   )
 
+  // Selected name fields in order for sortable display
+  const nameOrderItems = useMemo(() => {
+    return form.fileNameOrderIds
+      .map((id) => textFields.find((f) => f.id === id))
+      .filter((f): f is IFieldMeta => Boolean(f))
+  }, [form.fileNameOrderIds, textFields])
+
   useEffect(() => {
     if (!activeTable) return
 
@@ -184,6 +314,25 @@ export default function App() {
 
   const updateForm = <K extends keyof FormState>(key: K, value: FormState[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }))
+  }
+
+  const handleAttachmentChange = (ids: string[]) => {
+    updateForm('attachmentFieldIds', ids)
+  }
+
+  const handleNameFieldChange = (ids: string[]) => {
+    setForm((prev) => {
+      // Keep order list in sync: add newly selected to the end, remove deselected
+      const prevOrder = prev.fileNameOrderIds
+      const added = ids.filter((id) => !prev.fileNameFieldIds.includes(id))
+      const removed = prev.fileNameFieldIds.filter((id) => !ids.includes(id))
+      const nextOrder = prevOrder.filter((id) => !removed.includes(id)).concat(added)
+      return { ...prev, fileNameFieldIds: ids, fileNameOrderIds: nextOrder }
+    })
+  }
+
+  const handleNameOrderChange = (ids: string[]) => {
+    updateForm('fileNameOrderIds', ids)
   }
 
   const handlePresetSelect = (id: string) => {
@@ -264,7 +413,6 @@ export default function App() {
     } catch (err: any) {
       showToast(`导入失败：${err.message || '未知错误'}`, 'warning')
     } finally {
-      // reset input so the same file can be re-selected
       if (fileInputRef.current) fileInputRef.current.value = ''
     }
   }
@@ -309,6 +457,7 @@ export default function App() {
       attachmentFieldIds: form.attachmentFieldIds,
       fileNameType: form.fileNameType,
       fileNameFieldIds: form.fileNameFieldIds,
+      fileNameOrderIds: form.fileNameOrderIds,
       nameDelimiter: form.nameDelimiter,
       downloadMode: form.downloadMode,
       folderClassification: form.folderClassification,
@@ -379,12 +528,28 @@ export default function App() {
 
   return (
     <div className="plugin-container">
+      {/* Header */}
+      <div className="plugin-header">
+        <h1 className="plugin-title">附件批量下载</h1>
+        <div className="header-actions">
+          <button type="button" data-tip="刷新" onClick={() => window.location.reload()}>
+            {Icons.refresh}
+          </button>
+          <button type="button" data-tip="帮助" onClick={() => showToast('请联系管理员获取帮助', 'info')}>
+            {Icons.help}
+          </button>
+          <button type="button" data-tip="关于" onClick={() => setActiveTab('my')}>
+            {Icons.info}
+          </button>
+        </div>
+      </div>
+
       <div className="tabs">
         <button
           className={activeTab === 'download' ? 'active' : ''}
           onClick={() => setActiveTab('download')}
         >
-          <span className="tab-icon">{Icons.download}</span>
+          <span className="tab-icon">{Icons.cloudDownload}</span>
           下载
         </button>
         <button
@@ -473,7 +638,7 @@ export default function App() {
             <div className="card-title">基础配置</div>
 
             <div className="form-row">
-              <label className="form-label">数据表</label>
+              <label className="form-label">数据表列</label>
               <div className="form-control">
                 <select
                   value={form.tableId}
@@ -491,7 +656,7 @@ export default function App() {
 
             <div className="form-row">
               <label className="form-label">
-                视图
+                视图列
                 <Info tip="只会下载当前视图中可见的记录" />
               </label>
               <div className="form-control">
@@ -512,21 +677,13 @@ export default function App() {
             <div className="form-row">
               <label className="form-label">附件字段</label>
               <div className="form-control">
-                <select
-                  multiple
-                  value={form.attachmentFieldIds}
-                  onChange={(e) => {
-                    const options = Array.from(e.target.selectedOptions).map((o) => o.value)
-                    updateForm('attachmentFieldIds', options)
-                  }}
-                >
-                  {attachmentFields.map((f) => (
-                    <option key={f.id} value={f.id}>
-                      {f.name}
-                    </option>
-                  ))}
-                </select>
-                <div className="hint">按住 Ctrl/Cmd 可选择多个字段</div>
+                <TagSelector
+                  options={attachmentFields}
+                  selected={form.attachmentFieldIds}
+                  onChange={handleAttachmentChange}
+                  placeholder="请选择附件字段"
+                  emptyText="无更多附件字段"
+                />
               </div>
             </div>
 
@@ -596,24 +753,29 @@ export default function App() {
                     <Info tip="可选择一个或多个字段组合为文件名" />
                   </label>
                   <div className="form-control">
-                    <select
-                      multiple
-                      value={form.fileNameFieldIds}
-                      onChange={(e) => {
-                        const options = Array.from(e.target.selectedOptions).map((o) => o.value)
-                        updateForm('fileNameFieldIds', options)
-                      }}
-                    >
-                      {textFields.map((f) => (
-                        <option key={f.id} value={f.id}>
-                          {f.name}
-                        </option>
-                      ))}
-                    </select>
+                    <TagSelector
+                      options={textFields}
+                      selected={form.fileNameFieldIds}
+                      onChange={handleNameFieldChange}
+                      placeholder="请选择字段"
+                      emptyText="无更多字段"
+                    />
                   </div>
                 </div>
                 <div className="form-row">
-                  <label className="form-label">字段连接符</label>
+                  <label className="form-label">
+                    命名排序
+                    <Info tip="拖拽调整字段顺序，决定文件名组合的前后顺序" />
+                  </label>
+                  <div className="form-control">
+                    <SortableList items={nameOrderItems} onChange={handleNameOrderChange} />
+                  </div>
+                </div>
+                <div className="form-row">
+                  <label className="form-label">
+                    间隔文字
+                    <Info tip="多个字段值之间的连接符" />
+                  </label>
                   <div className="form-control">
                     <input
                       type="text"
@@ -724,7 +886,7 @@ export default function App() {
               disabled={isDownloading}
             >
               下载全部记录
-              <span className="btn-icon">{Icons.download}</span>
+              <span className="btn-icon">{Icons.cloudDownload}</span>
             </button>
           </div>
         </div>
@@ -735,11 +897,13 @@ export default function App() {
           <div className="card">
             <div className="card-title">关于插件</div>
             <p>飞书多维表格附件批量下载插件</p>
-            <p className="muted">版本：1.0.0</p>
+            <p className="muted">版本：1.1.0</p>
             <ul>
               <li>批量下载当前视图中可见记录的附件</li>
               <li>支持原文件名或按字段值重命名</li>
+              <li>支持拖拽调整命名字段顺序</li>
               <li>支持 ZIP 打包并按字段分文件夹</li>
+              <li>支持配置预设保存/导入/导出</li>
               <li>支持下载单条选中记录</li>
             </ul>
             <div className="hint">如需本地客户端/WebSocket 下载模式，可在此基础上扩展。</div>

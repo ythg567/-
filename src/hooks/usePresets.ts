@@ -7,6 +7,7 @@ export interface FormState {
   urlFieldId: string
   fileNameType: 'original' | 'field'
   fileNameFieldIds: string[]
+  fileNameOrderIds: string[]
   nameDelimiter: string
   downloadMode: 'zip' | 'individual'
   folderClassification: boolean

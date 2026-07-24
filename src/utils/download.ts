@@ -13,6 +13,7 @@ export interface DownloadConfig {
   attachmentFieldIds: string[]
   fileNameType: 'original' | 'field'
   fileNameFieldIds: string[]
+  fileNameOrderIds?: string[]
   nameDelimiter: string
   downloadMode: 'zip' | 'individual'
   folderClassification: boolean
@@ -153,13 +154,19 @@ export class AttachmentDownloader {
   private async applyFileNames() {
     if (this.config.fileNameType === 'original') return
 
-    const { fileNameFieldIds, nameDelimiter } = this.config
+    const { fileNameFieldIds, fileNameOrderIds, nameDelimiter } = this.config
     if (fileNameFieldIds.length === 0) return
+
+    // 按命名排序区域指定的顺序拼接；未指定则按选择顺序
+    const orderedIds =
+      fileNameOrderIds && fileNameOrderIds.length > 0
+        ? fileNameOrderIds.filter((id) => fileNameFieldIds.includes(id))
+        : fileNameFieldIds
 
     await Promise.all(
       this.cellList.map(async (cell) => {
         const names = await Promise.all(
-          fileNameFieldIds.map((fieldId) =>
+          orderedIds.map((fieldId) =>
             this.apis.getCellString(this.config.tableId, fieldId, cell.recordId)
           )
         )
