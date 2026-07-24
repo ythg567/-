@@ -923,7 +923,7 @@ export default function App() {
           <div className="card">
             <div className="card-title">关于插件</div>
             <p>飞书多维表格附件批量下载插件</p>
-            <p className="muted">版本：1.1.0</p>
+            <p className="muted">版本：1.1.1</p>
             <ul>
               <li>批量下载当前视图中可见记录的附件</li>
               <li>支持原文件名或按字段值重命名</li>
