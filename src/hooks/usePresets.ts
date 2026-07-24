@@ -29,6 +29,17 @@ function generateId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 }
 
+export function detectStorage(): boolean {
+  try {
+    const testKey = '__storage_test__'
+    localStorage.setItem(testKey, '1')
+    localStorage.removeItem(testKey)
+    return true
+  } catch {
+    return false
+  }
+}
+
 function readPresets(): Preset[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
@@ -41,15 +52,22 @@ function readPresets(): Preset[] {
 }
 
 function writePresets(presets: Preset[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 1, presets }))
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 1, presets }))
+  } catch {
+    // ignore in-memory fallback
+  }
 }
 
 export function usePresets(form: FormState) {
+  const [storageAvailable, setStorageAvailable] = useState<boolean>(false)
   const [presets, setPresets] = useState<Preset[]>([])
   const [selectedId, setSelectedId] = useState<string>('')
 
   // Load once on mount
   useEffect(() => {
+    const ok = detectStorage()
+    setStorageAvailable(ok)
     setPresets(readPresets())
   }, [])
 
@@ -141,7 +159,7 @@ export function usePresets(form: FormState) {
         return { ok: false, error: `解析失败：${e.message || '未知错误'}` }
       }
     },
-    [form, presets, persist]
+    [presets, persist]
   )
 
   const exportJson = useCallback((): string => {
@@ -151,6 +169,7 @@ export function usePresets(form: FormState) {
   return {
     presets,
     selectedId,
+    storageAvailable,
     setSelectedId,
     saveNew,
     overwrite,

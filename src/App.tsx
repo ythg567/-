@@ -242,6 +242,7 @@ export default function App() {
   const {
     presets,
     selectedId,
+    storageAvailable,
     setSelectedId,
     saveNew,
     overwrite,
@@ -260,6 +261,12 @@ export default function App() {
     currentPercentage: 0
   })
   const [log, setLog] = useState<string[]>([])
+
+  useEffect(() => {
+    if (!storageAvailable) {
+      showToast('当前环境无法持久化预设，配置仅在本次会话有效', 'warning')
+    }
+  }, [storageAvailable, showToast])
 
   const activeTable = useMemo(
     () => (form.tableId ? getTableInfo(form.tableId) : null),
@@ -346,10 +353,17 @@ export default function App() {
   }
 
   const handleSaveNewPreset = () => {
-    const name = window.prompt('请输入新预设名称：', `预设 ${presets.length + 1}`)
-    if (!name || !name.trim()) return
-    saveNew(name.trim())
-    showToast('已保存为新预设', 'success')
+    try {
+      const name = window.prompt('请输入新预设名称：', `预设 ${presets.length + 1}`)
+      if (!name || !name.trim()) return
+      saveNew(name.trim())
+      const msg = storageAvailable
+        ? '已保存为新预设'
+        : '已保存为新预设（当前会话有效，刷新后丢失）'
+      showToast(msg, 'success')
+    } catch (err: any) {
+      showToast(`保存失败：${err.message || '未知错误'}`, 'warning')
+    }
   }
 
   const handleOverwritePreset = () => {
@@ -360,8 +374,12 @@ export default function App() {
     const preset = presets.find((p) => p.id === selectedId)
     if (!preset) return
     if (window.confirm(`确定用当前配置覆盖预设「${preset.name}」吗？`)) {
-      overwrite(selectedId)
-      showToast('已覆盖所选预设', 'success')
+      try {
+        overwrite(selectedId)
+        showToast('已覆盖所选预设', 'success')
+      } catch (err: any) {
+        showToast(`覆盖失败：${err.message || '未知错误'}`, 'warning')
+      }
     }
   }
 
@@ -373,26 +391,34 @@ export default function App() {
     const preset = presets.find((p) => p.id === selectedId)
     if (!preset) return
     if (window.confirm(`确定删除预设「${preset.name}」吗？`)) {
-      remove(selectedId)
-      showToast('已删除所选预设', 'success')
+      try {
+        remove(selectedId)
+        showToast('已删除所选预设', 'success')
+      } catch (err: any) {
+        showToast(`删除失败：${err.message || '未知错误'}`, 'warning')
+      }
     }
   }
 
   const handleExportPresets = () => {
-    if (presets.length === 0) {
-      showToast('当前没有可导出的预设', 'warning')
-      return
+    try {
+      if (presets.length === 0) {
+        showToast('当前没有可导出的预设', 'warning')
+        return
+      }
+      const blob = new Blob([exportJson()], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `feishu-bitable-presets-${new Date().toISOString().slice(0, 10)}.json`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+      showToast('预设已导出', 'success')
+    } catch (err: any) {
+      showToast(`导出失败：${err.message || '未知错误'}`, 'warning')
     }
-    const blob = new Blob([exportJson()], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `feishu-bitable-presets-${new Date().toISOString().slice(0, 10)}.json`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
-    showToast('预设已导出', 'success')
   }
 
   const handleImportClick = () => {
