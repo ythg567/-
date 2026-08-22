@@ -7,12 +7,8 @@ import {
   SUPPORT_TEXT_TYPES,
   FieldType
 } from './hooks/useBitable'
-import { usePresets, FormState } from './hooks/usePresets'
-import {
-  AttachmentDownloader,
-  DownloadConfig,
-  DownloadEvent
-} from './utils/download'
+import { usePresets, FormState, defaultForm } from './hooks/usePresets'
+import { AttachmentDownloader, DownloadConfig } from './utils/download'
 
 // Inline SVG icons (no extra dependency)
 const Icons = {
@@ -85,31 +81,85 @@ const Icons = {
     <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
       <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
     </svg>
+  ),
+  plus: (
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+      <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" />
+    </svg>
+  ),
+  arrowUp: (
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+      <path d="M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z" />
+    </svg>
+  ),
+  arrowDown: (
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+      <path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z" />
+    </svg>
+  ),
+  copy: (
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+      <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z" />
+    </svg>
+  ),
+  card: (
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+      <path d="M20 4H4c-1.11 0-1.99.89-1.99 2L2 18c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V6c0-1.11-.89-2-2-2zm0 14H4v-6h16v6zm0-10H4V6h16v2z" />
+    </svg>
+  ),
+  qrcode: (
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+      <path d="M3 11h8V3H3v8zm2-6h4v4H5V5zM3 21h8v-8H3v8zm2-6h4v4H5v-4zM13 3v8h8V3h-8zm6 6h-4V5h4v4zM13 13h2v2h-2zM15 15h2v2h-2zM13 17h2v2h-2zM17 13h2v2h-2zM19 15h2v2h-2zM17 17h2v2h-2zM15 19h2v2h-2zM19 19h2v2h-2z" />
+    </svg>
+  ),
+  minus: (
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+      <path d="M19 13H5v-2h14v2z" />
+    </svg>
   )
 }
 
 type Tab = 'download' | 'my'
-
-const defaultForm: FormState = {
-  tableId: '',
-  viewId: '',
-  attachmentFieldIds: [],
-  urlFieldId: '',
-  fileNameType: 'original',
-  fileNameFieldIds: [],
-  fileNameOrderIds: [],
-  nameDelimiter: '-',
-  downloadMode: 'zip',
-  folderClassification: false,
-  firstFolderFieldId: '',
-  secondFolderFieldId: ''
-}
 
 function Info({ tip }: { tip: string }) {
   return (
     <span className="info-icon" title={tip}>
       {Icons.info}
     </span>
+  )
+}
+
+/** Green switch matching screenshot */
+function Switch({
+  checked,
+  onChange
+}: {
+  checked: boolean
+  onChange: (v: boolean) => void
+}) {
+  return (
+    <label className="switch">
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      <span className="slider" />
+    </label>
+  )
+}
+
+/** Green checkbox matching screenshot */
+function Checkbox({
+  checked,
+  onChange,
+  children
+}: {
+  checked: boolean
+  onChange: (v: boolean) => void
+  children?: React.ReactNode
+}) {
+  return (
+    <label className="checkbox-row" onClick={() => onChange(!checked)}>
+      <span className={`checkbox ${checked ? 'checked' : ''}`}>{checked ? Icons.check : null}</span>
+      {children && <span className="checkbox-label">{children}</span>}
+    </label>
   )
 }
 
@@ -169,57 +219,6 @@ function TagSelector({
   )
 }
 
-/** Simple drag-to-reorder list for naming order */
-function SortableList({
-  items,
-  onChange
-}: {
-  items: { id: string; name: string }[]
-  onChange: (ids: string[]) => void
-}) {
-  const [dragIndex, setDragIndex] = useState<number | null>(null)
-
-  const handleDragStart = (idx: number) => {
-    setDragIndex(idx)
-  }
-
-  const handleDragOver = (e: React.DragEvent, idx: number) => {
-    e.preventDefault()
-    if (dragIndex === null || dragIndex === idx) return
-    const next = [...items]
-    const [removed] = next.splice(dragIndex, 1)
-    next.splice(idx, 0, removed)
-    setDragIndex(idx)
-    onChange(next.map((i) => i.id))
-  }
-
-  const handleDragEnd = () => {
-    setDragIndex(null)
-  }
-
-  if (items.length === 0) {
-    return <div className="sortable-empty">请在上方字段列中选择字段</div>
-  }
-
-  return (
-    <div className="sortable-list">
-      {items.map((item, idx) => (
-        <div
-          key={item.id}
-          className={`sortable-item ${dragIndex === idx ? 'dragging' : ''}`}
-          draggable
-          onDragStart={() => handleDragStart(idx)}
-          onDragOver={(e) => handleDragOver(e, idx)}
-          onDragEnd={handleDragEnd}
-        >
-          <span className="sortable-drag">{Icons.drag}</span>
-          <span className="sortable-name">{item.name}</span>
-        </div>
-      ))}
-    </div>
-  )
-}
-
 export default function App() {
   const {
     loading,
@@ -251,6 +250,7 @@ export default function App() {
     importFromJson,
     exportJson
   } = usePresets(form)
+
   const [isDownloading, setIsDownloading] = useState(false)
   const [progressOpen, setProgressOpen] = useState(false)
   const [progress, setProgress] = useState({
@@ -261,6 +261,22 @@ export default function App() {
     currentPercentage: 0
   })
   const [log, setLog] = useState<string[]>([])
+
+  // Membership mock state
+  const [memberInfo] = useState(() => {
+    const chars = '0123456789ABCDEF'
+    const id =
+      'FM-' +
+      Array.from({ length: 32 }, () => chars[Math.floor(Math.random() * chars.length)]).join('')
+    const trialEnd = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+    return {
+      id,
+      trialEnd,
+      used: 0,
+      total: 1000,
+      status: '生效中' as const
+    }
+  })
 
   useEffect(() => {
     if (!storageAvailable) {
@@ -275,6 +291,12 @@ export default function App() {
 
   const views = useMemo<IViewMeta[]>(() => activeTable?.viewMetaList || [], [activeTable])
   const fields = useMemo<IFieldMeta[]>(() => activeTable?.fieldMetaList || [], [activeTable])
+  const fieldMap = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const f of fields) map.set(f.id, f.name)
+    return map
+  }, [fields])
+
   const attachmentFields = useMemo(
     () => fields.filter((f) => isAttachmentField(f, tableInfoList)),
     [fields, tableInfoList]
@@ -287,14 +309,12 @@ export default function App() {
     () => fields.filter((f) => f.type === FieldType.Text || f.type === FieldType.Url),
     [fields]
   )
+  const allExportableFields = useMemo(
+    () => fields.filter((f) => f.type !== FieldType.Attachment),
+    [fields]
+  )
 
-  // Selected name fields in order for sortable display
-  const nameOrderItems = useMemo(() => {
-    return form.fileNameOrderIds
-      .map((id) => textFields.find((f) => f.id === id))
-      .filter((f): f is IFieldMeta => Boolean(f))
-  }, [form.fileNameOrderIds, textFields])
-
+  // Auto select defaults when table changes
   useEffect(() => {
     if (!activeTable) return
 
@@ -302,9 +322,10 @@ export default function App() {
       const next = { ...prev }
       const viewExists = views.some((v) => v.id === prev.viewId)
       if (!viewExists) {
-        next.viewId = selection.viewId && views.some((v) => v.id === selection.viewId)
-          ? selection.viewId
-          : views[0]?.id || ''
+        next.viewId =
+          selection.viewId && views.some((v) => v.id === selection.viewId)
+            ? selection.viewId
+            : views[0]?.id || ''
       }
       if (attachmentFields.length > 0 && prev.attachmentFieldIds.length === 0) {
         next.attachmentFieldIds = attachmentFields.map((f) => f.id)
@@ -329,7 +350,6 @@ export default function App() {
 
   const handleNameFieldChange = (ids: string[]) => {
     setForm((prev) => {
-      // Keep order list in sync: add newly selected to the end, remove deselected
       const prevOrder = prev.fileNameOrderIds
       const added = ids.filter((id) => !prev.fileNameFieldIds.includes(id))
       const removed = prev.fileNameFieldIds.filter((id) => !ids.includes(id))
@@ -338,8 +358,42 @@ export default function App() {
     })
   }
 
-  const handleNameOrderChange = (ids: string[]) => {
-    updateForm('fileNameOrderIds', ids)
+  const handleExportFieldChange = (ids: string[]) => {
+    updateForm('exportFieldIds', ids)
+  }
+
+  const handleFolderLevelChange = (index: number, fieldId: string) => {
+    setForm((prev) => {
+      const next = [...prev.folderLevels]
+      next[index] = { fieldId }
+      return { ...prev, folderLevels: next }
+    })
+  }
+
+  const handleAddFolderLevel = () => {
+    setForm((prev) => ({
+      ...prev,
+      folderLevels: [...prev.folderLevels, { fieldId: '' }]
+    }))
+  }
+
+  const handleRemoveFolderLevel = (index: number) => {
+    setForm((prev) => ({
+      ...prev,
+      folderLevels: prev.folderLevels.filter((_, i) => i !== index)
+    }))
+  }
+
+  const handleMoveFolderLevel = (index: number, direction: -1 | 1) => {
+    setForm((prev) => {
+      const next = [...prev.folderLevels]
+      const target = index + direction
+      if (target < 0 || target >= next.length) return prev
+      const tmp = next[index]
+      next[index] = next[target]
+      next[target] = tmp
+      return { ...prev, folderLevels: next }
+    })
   }
 
   const handlePresetSelect = (id: string) => {
@@ -446,15 +500,20 @@ export default function App() {
   const validate = (): string | null => {
     if (!form.tableId) return '请选择数据表'
     if (!form.viewId) return '请选择视图'
-    if (form.attachmentFieldIds.length === 0) return '请至少选择一个附件字段'
+    if (form.attachmentFieldIds.length === 0 && !form.recordContent) {
+      return '请至少选择附件字段或开启记录内容导出'
+    }
+    if (form.recordContent && form.exportFieldIds.length === 0) {
+      return '开启记录内容后，请选择要导出的字段'
+    }
     if (form.fileNameType === 'field' && form.fileNameFieldIds.length === 0) {
       return '请选择用于命名的字段'
     }
-    if (form.folderClassification && !form.firstFolderFieldId && !form.secondFolderFieldId) {
-      return '开启文件夹分类后，请至少选择一级或二级目录字段'
+    if (form.folderClassification && form.folderLevels.length === 0) {
+      return '开启文件夹分类后，请至少添加一个目录层级'
     }
-    if (form.firstFolderFieldId && form.firstFolderFieldId === form.secondFolderFieldId) {
-      return '一级目录与二级目录不能相同'
+    if (form.folderClassification && form.folderLevels.some((l) => !l.fieldId)) {
+      return '请为每个目录层级选择字段'
     }
     return null
   }
@@ -487,8 +546,15 @@ export default function App() {
       nameDelimiter: form.nameDelimiter,
       downloadMode: form.downloadMode,
       folderClassification: form.folderClassification,
-      firstFolderFieldId: form.firstFolderFieldId,
-      secondFolderFieldId: form.secondFolderFieldId
+      folderLevels: form.folderLevels,
+      recordContent: form.recordContent,
+      exportFormat: form.exportFormat,
+      exportFieldIds: form.exportFieldIds,
+      showFieldName: form.showFieldName,
+      keepBlankLine: form.keepBlankLine,
+      ignoreEmptyField: form.ignoreEmptyField,
+      emptyFieldHandling: form.emptyFieldHandling,
+      downloadExecution: form.downloadExecution
     }
 
     setProgress({ total: 0, completed: 0, failed: 0, currentName: '', currentPercentage: 0 })
@@ -499,10 +565,11 @@ export default function App() {
     const downloader = new AttachmentDownloader(
       config,
       { fetchRecords, getCellString, getAttachmentUrl },
-      activeTable?.name || '附件下载'
+      activeTable?.name || '附件下载',
+      fieldMap
     )
 
-    downloader.on((event: DownloadEvent) => {
+    downloader.on((event) => {
       switch (event.type) {
         case 'pending':
           setProgress((p) => ({ ...p, total: event.total }))
@@ -534,6 +601,24 @@ export default function App() {
     await downloader.start(selectedOnly ? selection.recordId : undefined)
   }
 
+  const handleCopyMemberId = async () => {
+    try {
+      await navigator.clipboard.writeText(memberInfo.id)
+      showToast('会员 ID 已复制', 'success')
+    } catch {
+      showToast('复制失败', 'warning')
+    }
+  }
+
+  const formatDate = (d: Date) => {
+    const yyyy = d.getFullYear()
+    const mm = String(d.getMonth() + 1).padStart(2, '0')
+    const dd = String(d.getDate()).padStart(2, '0')
+    const hh = String(d.getHours()).padStart(2, '0')
+    const mi = String(d.getMinutes()).padStart(2, '0')
+    return `${yyyy}/${mm}/${dd} ${hh}:${mi}`
+  }
+
   if (loading) {
     return (
       <div className="plugin-container center">
@@ -558,14 +643,11 @@ export default function App() {
       <div className="plugin-header">
         <h1 className="plugin-title">附件批量下载</h1>
         <div className="header-actions">
-          <button type="button" data-tip="刷新" onClick={() => window.location.reload()}>
-            {Icons.refresh}
-          </button>
           <button type="button" data-tip="帮助" onClick={() => showToast('请联系管理员获取帮助', 'info')}>
             {Icons.help}
           </button>
-          <button type="button" data-tip="关于" onClick={() => setActiveTab('my')}>
-            {Icons.info}
+          <button type="button" data-tip="刷新" onClick={() => window.location.reload()}>
+            {Icons.refresh}
           </button>
         </div>
       </div>
@@ -578,10 +660,7 @@ export default function App() {
           <span className="tab-icon">{Icons.cloudDownload}</span>
           下载
         </button>
-        <button
-          className={activeTab === 'my' ? 'active' : ''}
-          onClick={() => setActiveTab('my')}
-        >
+        <button className={activeTab === 'my' ? 'active' : ''} onClick={() => setActiveTab('my')}>
           <span className="tab-icon">{Icons.person}</span>
           我的
         </button>
@@ -611,6 +690,7 @@ export default function App() {
               <div className="preset-actions">
                 <button
                   type="button"
+                  className="action-blue"
                   data-tip="保存当前配置为新预设"
                   onClick={handleSaveNewPreset}
                 >
@@ -618,18 +698,12 @@ export default function App() {
                 </button>
                 <button
                   type="button"
+                  className="action-blue"
                   data-tip="用当前配置覆盖所选预设"
                   onClick={handleOverwritePreset}
                   disabled={!selectedId}
                 >
                   {Icons.edit}
-                </button>
-                <button
-                  type="button"
-                  data-tip="从 JSON 文件导入预设"
-                  onClick={handleImportClick}
-                >
-                  {Icons.upload}
                 </button>
                 <button
                   type="button"
@@ -639,12 +713,15 @@ export default function App() {
                 >
                   {Icons.download2}
                 </button>
+                <button type="button" data-tip="从 JSON 文件导入预设" onClick={handleImportClick}>
+                  {Icons.upload}
+                </button>
                 <button
                   type="button"
+                  className="action-red"
                   data-tip="删除所选预设"
                   onClick={handleDeletePreset}
                   disabled={!selectedId}
-                  className="danger"
                 >
                   {Icons.delete}
                 </button>
@@ -666,10 +743,7 @@ export default function App() {
             <div className="form-row">
               <label className="form-label">数据表列</label>
               <div className="form-control">
-                <select
-                  value={form.tableId}
-                  onChange={(e) => updateForm('tableId', e.target.value)}
-                >
+                <select value={form.tableId} onChange={(e) => updateForm('tableId', e.target.value)}>
                   <option value="">请选择数据表</option>
                   {tableInfoList.map((t) => (
                     <option key={t.id} value={t.id}>
@@ -686,10 +760,7 @@ export default function App() {
                 <Info tip="只会下载当前视图中可见的记录" />
               </label>
               <div className="form-control">
-                <select
-                  value={form.viewId}
-                  onChange={(e) => updateForm('viewId', e.target.value)}
-                >
+                <select value={form.viewId} onChange={(e) => updateForm('viewId', e.target.value)}>
                   <option value="">请选择视图</option>
                   {views.map((v) => (
                     <option key={v.id} value={v.id}>
@@ -719,10 +790,7 @@ export default function App() {
                 <Info tip="预留字段，当前版本仅做展示" />
               </label>
               <div className="form-control">
-                <select
-                  value={form.urlFieldId}
-                  onChange={(e) => updateForm('urlFieldId', e.target.value)}
-                >
+                <select value={form.urlFieldId} onChange={(e) => updateForm('urlFieldId', e.target.value)}>
                   <option value="">请选择 URL 字段</option>
                   {urlFields.map((f) => (
                     <option key={f.id} value={f.id}>
@@ -733,10 +801,7 @@ export default function App() {
               </div>
             </div>
 
-            <button
-              className="advanced-toggle"
-              onClick={() => setAdvancedOpen((v) => !v)}
-            >
+            <button className="advanced-toggle" onClick={() => setAdvancedOpen((v) => !v)}>
               高级设置
               <span className={`advanced-chevron ${advancedOpen ? 'open' : ''}`}>▼</span>
             </button>
@@ -754,16 +819,41 @@ export default function App() {
             )}
           </div>
 
-          {/* 命名与分类 */}
+          {/* 记录内容 */}
+          <div className="card toggle-card">
+            <div className="toggle-row">
+              <span className="toggle-label">记录内容</span>
+              <Switch checked={form.recordContent} onChange={(v) => updateForm('recordContent', v)} />
+            </div>
+          </div>
+
+          {/* 导出格式 */}
+          {form.recordContent && (
+            <div className="card">
+              <div className="form-row">
+                <label className="form-label">导出格式</label>
+                <div className="form-control">
+                  <select
+                    value={form.exportFormat}
+                    onChange={(e) => updateForm('exportFormat', e.target.value as any)}
+                  >
+                    <option value="txt">TXT</option>
+                    <option value="md">Markdown</option>
+                    <option value="json">JSON</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 文件命名与导出字段 */}
           <div className="card">
             <div className="form-row">
               <label className="form-label">文件命名方式</label>
               <div className="form-control">
                 <select
                   value={form.fileNameType}
-                  onChange={(e) =>
-                    updateForm('fileNameType', e.target.value as 'original' | 'field')
-                  }
+                  onChange={(e) => updateForm('fileNameType', e.target.value as 'original' | 'field')}
                 >
                   <option value="original">原文件名称</option>
                   <option value="field">从表字段选择</option>
@@ -772,102 +862,138 @@ export default function App() {
             </div>
 
             {form.fileNameType === 'field' && (
+              <div className="form-row">
+                <label className="form-label">文件名字段</label>
+                <div className="form-control">
+                  <TagSelector
+                    options={textFields}
+                    selected={form.fileNameFieldIds}
+                    onChange={handleNameFieldChange}
+                    placeholder="可选，用于生成文件名，不会自动写入文件内容"
+                    emptyText="无更多字段"
+                  />
+                </div>
+              </div>
+            )}
+
+            {form.recordContent && (
               <>
                 <div className="form-row">
-                  <label className="form-label">
-                    字段列
-                    <Info tip="可选择一个或多个字段组合为文件名" />
-                  </label>
+                  <label className="form-label">要导出的字段</label>
                   <div className="form-control">
                     <TagSelector
-                      options={textFields}
-                      selected={form.fileNameFieldIds}
-                      onChange={handleNameFieldChange}
-                      placeholder="请选择字段"
+                      options={allExportableFields}
+                      selected={form.exportFieldIds}
+                      onChange={handleExportFieldChange}
+                      placeholder="选择要导出的字段"
                       emptyText="无更多字段"
                     />
                   </div>
                 </div>
-                <div className="form-row">
-                  <label className="form-label">
-                    命名排序
-                    <Info tip="拖拽调整字段顺序，决定文件名组合的前后顺序" />
-                  </label>
-                  <div className="form-control">
-                    <SortableList items={nameOrderItems} onChange={handleNameOrderChange} />
-                  </div>
-                </div>
-                <div className="form-row">
-                  <label className="form-label">
-                    间隔文字
-                    <Info tip="多个字段值之间的连接符" />
-                  </label>
-                  <div className="form-control">
-                    <input
-                      type="text"
-                      value={form.nameDelimiter}
-                      onChange={(e) => updateForm('nameDelimiter', e.target.value)}
+
+                <div className="card toggle-card inner">
+                  <div className="toggle-row">
+                    <span className="toggle-label">显示字段名</span>
+                    <Switch
+                      checked={form.showFieldName}
+                      onChange={(v) => updateForm('showFieldName', v)}
                     />
                   </div>
                 </div>
-              </>
-            )}
 
-            <div className="form-row">
-              <label className="form-label">
-                文件夹分类
-                <Info tip="仅在 ZIP 打包下载时生效" />
-              </label>
-              <div className="form-control inline">
-                <label className="switch">
-                  <input
-                    type="checkbox"
-                    checked={form.folderClassification}
-                    onChange={(e) => updateForm('folderClassification', e.target.checked)}
-                  />
-                  <span className="slider" />
-                </label>
-                <span className="switch-label">{form.folderClassification ? '是' : '否'}</span>
-              </div>
-            </div>
-
-            {form.folderClassification && form.downloadMode === 'zip' && (
-              <>
-                <div className="form-row">
-                  <label className="form-label">一级目录</label>
-                  <div className="form-control">
-                    <select
-                      value={form.firstFolderFieldId}
-                      onChange={(e) => updateForm('firstFolderFieldId', e.target.value)}
-                    >
-                      <option value="">请选择</option>
-                      {textFields.map((f) => (
-                        <option key={f.id} value={f.id}>
-                          {f.name}
-                        </option>
-                      ))}
-                    </select>
+                <div className="card toggle-card inner">
+                  <div className="toggle-row">
+                    <span className="toggle-label">字段之间保留空行</span>
+                    <Switch
+                      checked={form.keepBlankLine}
+                      onChange={(v) => updateForm('keepBlankLine', v)}
+                    />
                   </div>
                 </div>
+
+                <div className="form-row checkbox-row-wrap">
+                  <Checkbox
+                    checked={form.ignoreEmptyField}
+                    onChange={(v) => updateForm('ignoreEmptyField', v)}
+                  >
+                    忽略空字段
+                  </Checkbox>
+                </div>
+
                 <div className="form-row">
-                  <label className="form-label">二级目录</label>
+                  <label className="form-label">空字段处理</label>
                   <div className="form-control">
                     <select
-                      value={form.secondFolderFieldId}
-                      onChange={(e) => updateForm('secondFolderFieldId', e.target.value)}
+                      value={form.emptyFieldHandling}
+                      onChange={(e) => updateForm('emptyFieldHandling', e.target.value as any)}
                     >
-                      <option value="">请选择</option>
-                      {textFields.map((f) => (
-                        <option key={f.id} value={f.id}>
-                          {f.name}
-                        </option>
-                      ))}
+                      <option value="ignore">忽略空字段</option>
+                      <option value="keep">保留空字段</option>
                     </select>
                   </div>
                 </div>
               </>
             )}
           </div>
+
+          {/* 文件夹分类 */}
+          <div className="card toggle-card">
+            <div className="toggle-row">
+              <span className="toggle-label">文件夹分类</span>
+              <Switch
+                checked={form.folderClassification}
+                onChange={(v) => updateForm('folderClassification', v)}
+              />
+            </div>
+          </div>
+
+          {form.folderClassification && form.downloadMode === 'zip' && (
+            <div className="card">
+              <div className="card-title">
+                目录层级
+                <Info tip="按字段值创建多级文件夹，仅在 ZIP 打包时生效" />
+              </div>
+              {form.folderLevels.map((level, index) => (
+                <div className="folder-level-row" key={index}>
+                  <span className="folder-level-index">{index + 1}</span>
+                  <select
+                    value={level.fieldId}
+                    onChange={(e) => handleFolderLevelChange(index, e.target.value)}
+                  >
+                    <option value="">请选择目录字段</option>
+                    {textFields.map((f) => (
+                      <option key={f.id} value={f.id}>
+                        {f.name}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="folder-level-actions">
+                    <button
+                      type="button"
+                      disabled={index === 0}
+                      onClick={() => handleMoveFolderLevel(index, -1)}
+                    >
+                      {Icons.arrowUp}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={index === form.folderLevels.length - 1}
+                      onClick={() => handleMoveFolderLevel(index, 1)}
+                    >
+                      {Icons.arrowDown}
+                    </button>
+                    <button type="button" className="action-red" onClick={() => handleRemoveFolderLevel(index)}>
+                      {Icons.delete}
+                    </button>
+                  </div>
+                </div>
+              ))}
+              <button type="button" className="add-level-btn" onClick={handleAddFolderLevel}>
+                <span className="btn-icon">{Icons.plus}</span>
+                添加目录层级
+              </button>
+            </div>
+          )}
 
           {/* 下载配置 */}
           <div className="card">
@@ -887,9 +1013,7 @@ export default function App() {
               <div className="form-control">
                 <select
                   value={form.downloadMode}
-                  onChange={(e) =>
-                    updateForm('downloadMode', e.target.value as 'zip' | 'individual')
-                  }
+                  onChange={(e) => updateForm('downloadMode', e.target.value as 'zip' | 'individual')}
                 >
                   <option value="zip">zip 打包下载</option>
                   <option value="individual">单独下载</option>
@@ -899,18 +1023,10 @@ export default function App() {
           </div>
 
           <div className="footer-actions">
-            <button
-              className="btn-secondary"
-              onClick={() => handleDownload(true)}
-              disabled={isDownloading}
-            >
+            <button className="btn-secondary" onClick={() => handleDownload(true)} disabled={isDownloading}>
               下载所选记录
             </button>
-            <button
-              className="btn-primary"
-              onClick={() => handleDownload(false)}
-              disabled={isDownloading}
-            >
+            <button className="btn-primary" onClick={() => handleDownload(false)} disabled={isDownloading}>
               下载全部记录
               <span className="btn-icon">{Icons.cloudDownload}</span>
             </button>
@@ -919,31 +1035,83 @@ export default function App() {
       )}
 
       {activeTab === 'my' && (
-        <div className="panel about">
-          <div className="card">
-            <div className="card-title">关于插件</div>
-            <p>飞书多维表格附件批量下载插件</p>
-            <p className="muted">版本：1.1.1</p>
-            <ul>
-              <li>批量下载当前视图中可见记录的附件</li>
-              <li>支持原文件名或按字段值重命名</li>
-              <li>支持拖拽调整命名字段顺序</li>
-              <li>支持 ZIP 打包并按字段分文件夹</li>
-              <li>支持配置预设保存/导入/导出</li>
-              <li>支持下载单条选中记录</li>
-            </ul>
-            <div className="hint">如需本地客户端/WebSocket 下载模式，可在此基础上扩展。</div>
+        <div className="panel my-panel">
+          <div className="my-header">
+            <h2>会员</h2>
+            <button type="button" onClick={() => window.location.reload()}>
+              {Icons.refresh}
+            </button>
           </div>
+
+          <div className="card member-card">
+            <div className="member-row">
+              <div className="member-label">会员 ID</div>
+              <div className="member-id">{memberInfo.id}</div>
+              <button type="button" className="copy-btn" onClick={handleCopyMemberId}>
+                {Icons.copy}
+                复制
+              </button>
+            </div>
+          </div>
+
+          <div className="card trial-card">
+            <div className="trial-title">7天免费试用</div>
+            <div className="trial-status">
+              <span className="trial-date">有效期至 {formatDate(memberInfo.trialEnd)}</span>
+              <span className="status-tag active">{memberInfo.status}</span>
+            </div>
+            <div className="trial-usage">
+              <span>
+                已使用 <strong>{memberInfo.used}</strong> / {memberInfo.total.toLocaleString()} 个文件
+              </span>
+              <span>
+                剩余 <strong>{(memberInfo.total - memberInfo.used).toLocaleString()}</strong> 个文件
+              </span>
+            </div>
+          </div>
+
+          <div className="record-grid">
+            <button type="button" className="record-item" onClick={() => showToast('暂无支付记录', 'info')}>
+              <span className="record-icon">{Icons.card}</span>
+              <span>支付记录</span>
+            </button>
+            <button type="button" className="record-item" onClick={() => showToast('暂无开通记录', 'info')}>
+              <span className="record-icon">{Icons.qrcode}</span>
+              <span>开通记录</span>
+            </button>
+            <button type="button" className="record-item" onClick={() => showToast('暂无消耗记录', 'info')}>
+              <span className="record-icon">{Icons.minus}</span>
+              <span>消耗记录</span>
+            </button>
+          </div>
+
+          <div className="member-actions">
+            <button type="button" className="btn-outline" onClick={() => showToast('功能开发中', 'info')}>
+              兑换激活码
+            </button>
+            <button type="button" className="btn-primary" onClick={() => showToast('功能开发中', 'info')}>
+              购买套餐
+            </button>
+          </div>
+
+          <div className="version">当前版本 2.0.18</div>
         </div>
       )}
 
       {progressOpen && (
-        <div className="modal-overlay" onClick={() => { if (!isDownloading) setProgressOpen(false) }}>
+        <div
+          className="modal-overlay"
+          onClick={() => {
+            if (!isDownloading) setProgressOpen(false)
+          }}
+        >
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h4>下载进度</h4>
               {!isDownloading && (
-                <button className="close" onClick={() => setProgressOpen(false)}>{Icons.close}</button>
+                <button className="close" onClick={() => setProgressOpen(false)}>
+                  {Icons.close}
+                </button>
               )}
             </div>
             <div className="modal-body">

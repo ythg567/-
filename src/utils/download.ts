@@ -17,8 +17,24 @@ export interface DownloadConfig {
   nameDelimiter: string
   downloadMode: 'zip' | 'individual'
   folderClassification: boolean
-  firstFolderFieldId?: string
-  secondFolderFieldId?: string
+  /** 多级目录字段，顺序即目录层级 */
+  folderLevels: { fieldId: string }[]
+  /** 是否同时导出记录内容文本文件 */
+  recordContent: boolean
+  /** 记录内容导出格式 */
+  exportFormat: 'txt' | 'md' | 'json'
+  /** 要导出到记录内容中的字段 */
+  exportFieldIds: string[]
+  /** 是否在记录内容中显示字段名 */
+  showFieldName: boolean
+  /** 字段之间是否保留空行 */
+  keepBlankLine: boolean
+  /** 是否忽略空字段 */
+  ignoreEmptyField: boolean
+  /** 空字段处理方式 */
+  emptyFieldHandling: 'ignore' | 'keep'
+  /** 下载执行方式，当前仅支持浏览器直接下载 */
+  downloadExecution: 'browser'
 }
 
 export interface AttachmentItem {
@@ -32,6 +48,15 @@ export interface AttachmentItem {
   path: string
   displayName: string
   fileUrl?: string
+}
+
+export interface RecordExportItem {
+  recordId: string
+  path: string
+  displayName: string
+  order: number
+  content: string
+  ext: string
 }
 
 export type DownloadEvent =
@@ -73,13 +98,16 @@ export class AttachmentDownloader {
   private apis: BitableApis
   private listeners: EventCallback[] = []
   private cellList: AttachmentItem[] = []
+  private recordList: RecordExportItem[] = []
   private usedNames = new Set<string>()
   private zipName: string
+  private fieldMap: Map<string, string> = new Map()
 
-  constructor(config: DownloadConfig, apis: BitableApis, zipName: string) {
+  constructor(config: DownloadConfig, apis: BitableApis, zipName: string, fieldMap?: Map<string, string>) {
     this.config = config
     this.apis = apis
     this.zipName = zipName
+    if (fieldMap) this.fieldMap = fieldMap
   }
 
   on(event: EventCallback) {
@@ -92,6 +120,8 @@ export class AttachmentDownloader {
 
   async start(selectedRecordId?: string) {
     this.usedNames.clear()
+    this.cellList = []
+    this.recordList = []
     this.emit({ type: 'info', message: '正在读取记录...' })
 
     const records = await this.apis.fetchRecords(
@@ -100,17 +130,18 @@ export class AttachmentDownloader {
       selectedRecordId
     )
 
-    this.buildCellList(records)
+    this.buildLists(records)
     await this.applyFileNames()
     await this.applyFolderPath()
 
-    if (this.cellList.length === 0) {
-      this.emit({ type: 'info', message: '没有需要下载的附件。' })
+    const total = this.cellList.length + this.recordList.length
+    if (total === 0) {
+      this.emit({ type: 'info', message: '没有需要下载的内容。' })
       this.emit({ type: 'finished' })
       return
     }
 
-    this.emit({ type: 'pending', total: this.cellList.length })
+    this.emit({ type: 'pending', total })
 
     try {
       if (this.config.downloadMode === 'zip') {
@@ -125,16 +156,32 @@ export class AttachmentDownloader {
     }
   }
 
-  private buildCellList(records: IRecord[]) {
-    const list: AttachmentItem[] = []
+  private buildLists(records: IRecord[]) {
     let order = 1
     for (const record of records) {
+      // 构建记录内容导出项
+      if (this.config.recordContent && this.config.exportFieldIds.length > 0) {
+        const content = this.buildRecordContent(record)
+        if (content) {
+          const ext = this.config.exportFormat === 'md' ? '.md' : this.config.exportFormat === 'json' ? '.json' : '.txt'
+          this.recordList.push({
+            recordId: record.recordId,
+            path: '',
+            displayName: `记录内容${ext}`,
+            order: order++,
+            content,
+            ext
+          })
+        }
+      }
+
+      // 构建附件列表
       for (const fieldId of this.config.attachmentFieldIds) {
         const cell = record.fields[fieldId]
         if (!Array.isArray(cell)) continue
         for (const att of cell) {
           if (!att?.token || !att?.name) continue
-          list.push({
+          this.cellList.push({
             token: att.token,
             name: sanitizeFileName(att.name),
             size: att.size || 0,
@@ -148,54 +195,124 @@ export class AttachmentDownloader {
         }
       }
     }
-    this.cellList = list
+  }
+
+  private buildRecordContent(record: IRecord): string {
+    const { exportFormat, exportFieldIds, showFieldName, keepBlankLine, ignoreEmptyField, emptyFieldHandling } = this.config
+    const lines: string[] = []
+    const jsonObj: Record<string, string> = {}
+
+    for (const fieldId of exportFieldIds) {
+      const fieldName = this.fieldMap.get(fieldId) || fieldId
+      const rawValue = record.fields[fieldId]
+      // 简单文本化：数组取第一个文本，对象取 name，其他直接 toString
+      let value = ''
+      if (Array.isArray(rawValue) && rawValue.length > 0) {
+        value = String(rawValue[0]?.text ?? rawValue[0]?.name ?? rawValue[0] ?? '')
+      } else if (rawValue && typeof rawValue === 'object') {
+        value = String(rawValue.text ?? rawValue.name ?? '')
+      } else if (rawValue != null) {
+        value = String(rawValue)
+      }
+
+      const isEmpty = value.trim() === ''
+      if (isEmpty && ignoreEmptyField && emptyFieldHandling === 'ignore') {
+        continue
+      }
+
+      if (exportFormat === 'json') {
+        jsonObj[fieldName] = value
+      } else {
+        // txt / md
+        if (showFieldName) {
+          lines.push(`${fieldName}：${value}`)
+        } else {
+          lines.push(value)
+        }
+        if (keepBlankLine) {
+          lines.push('')
+        }
+      }
+    }
+
+    if (exportFormat === 'json') {
+      return JSON.stringify(jsonObj, null, 2)
+    }
+    // 如果最后多了一个空行，去掉
+    if (keepBlankLine && lines.length > 0 && lines[lines.length - 1] === '') {
+      lines.pop()
+    }
+    return lines.join('\n')
   }
 
   private async applyFileNames() {
-    if (this.config.fileNameType === 'original') return
+    const { fileNameType, fileNameFieldIds, fileNameOrderIds, nameDelimiter } = this.config
+    if (fileNameType === 'original') {
+      // 记录内容文件仍需按记录重命名
+      await this.applyRecordDisplayNames()
+      return
+    }
 
-    const { fileNameFieldIds, fileNameOrderIds, nameDelimiter } = this.config
-    if (fileNameFieldIds.length === 0) return
+    if (fileNameFieldIds.length === 0) {
+      await this.applyRecordDisplayNames()
+      return
+    }
 
-    // 按命名排序区域指定的顺序拼接；未指定则按选择顺序
     const orderedIds =
       fileNameOrderIds && fileNameOrderIds.length > 0
         ? fileNameOrderIds.filter((id) => fileNameFieldIds.includes(id))
         : fileNameFieldIds
 
-    await Promise.all(
-      this.cellList.map(async (cell) => {
-        const names = await Promise.all(
-          orderedIds.map((fieldId) =>
-            this.apis.getCellString(this.config.tableId, fieldId, cell.recordId)
-          )
+    // 先给每个记录计算一次文件名，避免重复请求
+    const recordNameMap = new Map<string, string>()
+    const records = new Set([...this.cellList, ...this.recordList].map((i) => i.recordId))
+    for (const recordId of records) {
+      const names = await Promise.all(
+        orderedIds.map((fieldId) =>
+          this.apis.getCellString(this.config.tableId, fieldId, recordId)
         )
-        const joined = names.filter(Boolean).join(nameDelimiter || '-')
-        if (joined) {
-          cell.displayName = replaceFileName(cell.name, joined, '未命名')
-        }
-      })
-    )
+      )
+      const joined = names.filter(Boolean).join(nameDelimiter || '-')
+      recordNameMap.set(recordId, joined)
+    }
+
+    for (const cell of this.cellList) {
+      const base = recordNameMap.get(cell.recordId)
+      if (base) {
+        cell.displayName = replaceFileName(cell.name, base, '未命名')
+      }
+    }
+
+    for (const rec of this.recordList) {
+      const base = recordNameMap.get(rec.recordId)
+      if (base) {
+        rec.displayName = `${sanitizeFileName(base)}${rec.ext}`
+      }
+    }
+  }
+
+  private async applyRecordDisplayNames() {
+    for (const rec of this.recordList) {
+      // 如果没有字段命名，使用记录 ID 后缀避免同名
+      rec.displayName = `记录内容_${rec.recordId.slice(-6)}${rec.ext}`
+    }
   }
 
   private async applyFolderPath() {
     if (this.config.downloadMode !== 'zip' || !this.config.folderClassification) return
+    if (!this.config.folderLevels || this.config.folderLevels.length === 0) return
 
-    const { firstFolderFieldId, secondFolderFieldId } = this.config
-    if (!firstFolderFieldId && !secondFolderFieldId) return
-
+    const items = [...this.cellList, ...this.recordList]
     await Promise.all(
-      this.cellList.map(async (cell) => {
+      items.map(async (item) => {
         const parts: string[] = []
-        if (firstFolderFieldId) {
-          const raw = await this.apis.getCellString(this.config.tableId, firstFolderFieldId, cell.recordId)
-          parts.push(getFolderName(raw))
+        for (const level of this.config.folderLevels) {
+          if (!level.fieldId) continue
+          const raw = await this.apis.getCellString(this.config.tableId, level.fieldId, item.recordId)
+          const folder = getFolderName(raw)
+          if (folder) parts.push(folder)
         }
-        if (secondFolderFieldId) {
-          const raw = await this.apis.getCellString(this.config.tableId, secondFolderFieldId, cell.recordId)
-          parts.push(getFolderName(raw))
-        }
-        cell.path = parts.filter(Boolean).map((p) => `${p}/`).join('')
+        item.path = parts.filter(Boolean).map((p) => `${p}/`).join('')
       })
     )
   }
@@ -237,7 +354,6 @@ export class AttachmentDownloader {
   private async fetchFile(cell: AttachmentItem): Promise<Blob | null> {
     this.emit({ type: 'progress', index: cell.order, name: cell.displayName, size: cell.size, percentage: 0 })
     try {
-      // 飞书临时链接可能在下载过程中过期，失败自动重试以换取更稳定的成功率
       await withRetry(() => this.resolveUrl(cell))
       const blob = await withRetry(() =>
         this.downloadBlob(cell.fileUrl!, (percentage) => {
@@ -259,21 +375,19 @@ export class AttachmentDownloader {
   }
 
   private async downloadIndividual() {
+    // 先下载附件
     for (const cell of this.cellList) {
       const blob = await this.fetchFile(cell)
       if (!blob) continue
-
       const finalName = getUniqueName(cell.displayName, '', this.usedNames)
-      const objectUrl = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = objectUrl
-      a.download = finalName
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(objectUrl)
-
-      // 浏览器批量下载之间稍作间隔，降低被拦截概率
+      this.triggerDownload(blob, finalName)
+      await new Promise((r) => setTimeout(r, 200))
+    }
+    // 再下载记录内容
+    for (const rec of this.recordList) {
+      const blob = new Blob([rec.content], { type: 'text/plain;charset=utf-8' })
+      const finalName = getUniqueName(rec.displayName, '', this.usedNames)
+      this.triggerDownload(blob, finalName)
       await new Promise((r) => setTimeout(r, 200))
     }
   }
@@ -283,9 +397,13 @@ export class AttachmentDownloader {
     for (const cell of this.cellList) {
       const blob = await this.fetchFile(cell)
       if (!blob) continue
-
       const finalName = getUniqueName(cell.displayName, cell.path, this.usedNames)
       zip.file(`${cell.path}${finalName}`, blob)
+    }
+    for (const rec of this.recordList) {
+      const blob = new Blob([rec.content], { type: 'text/plain;charset=utf-8' })
+      const finalName = getUniqueName(rec.displayName, rec.path, this.usedNames)
+      zip.file(`${rec.path}${finalName}`, blob)
     }
 
     this.emit({ type: 'info', message: '正在生成 ZIP...' })
@@ -293,5 +411,16 @@ export class AttachmentDownloader {
       this.emit({ type: 'progress', index: 0, name: '打包中', size: 0, percentage: Number(metadata.percent.toFixed(1)) })
     })
     saveAs(content, `${this.zipName}.zip`)
+  }
+
+  private triggerDownload(blob: Blob, fileName: string) {
+    const objectUrl = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = objectUrl
+    a.download = fileName
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(objectUrl)
   }
 }

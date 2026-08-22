@@ -11,8 +11,24 @@ export interface FormState {
   nameDelimiter: string
   downloadMode: 'zip' | 'individual'
   folderClassification: boolean
-  firstFolderFieldId: string
-  secondFolderFieldId: string
+  /** 可添加、删除、排序的多级目录字段 */
+  folderLevels: { fieldId: string }[]
+  /** 是否导出记录内容（文本文件） */
+  recordContent: boolean
+  /** 记录内容导出格式 */
+  exportFormat: 'txt' | 'md' | 'json'
+  /** 要导出到记录内容中的字段 */
+  exportFieldIds: string[]
+  /** 是否在导出的记录内容中显示字段名 */
+  showFieldName: boolean
+  /** 字段之间是否保留空行 */
+  keepBlankLine: boolean
+  /** 是否忽略空字段 */
+  ignoreEmptyField: boolean
+  /** 空字段处理方式：忽略 / 保留 */
+  emptyFieldHandling: 'ignore' | 'keep'
+  /** 下载执行方式，当前仅支持浏览器直接下载 */
+  downloadExecution: 'browser'
 }
 
 export interface Preset {
@@ -24,6 +40,28 @@ export interface Preset {
 }
 
 const STORAGE_KEY = 'feishu-bitable-downloader.presets'
+
+export const defaultForm: FormState = {
+  tableId: '',
+  viewId: '',
+  attachmentFieldIds: [],
+  urlFieldId: '',
+  fileNameType: 'original',
+  fileNameFieldIds: [],
+  fileNameOrderIds: [],
+  nameDelimiter: '-',
+  downloadMode: 'zip',
+  folderClassification: false,
+  folderLevels: [],
+  recordContent: false,
+  exportFormat: 'txt',
+  exportFieldIds: [],
+  showFieldName: false,
+  keepBlankLine: false,
+  ignoreEmptyField: false,
+  emptyFieldHandling: 'ignore',
+  downloadExecution: 'browser'
+}
 
 function generateId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
@@ -40,12 +78,32 @@ export function detectStorage(): boolean {
   }
 }
 
+/** 把旧版预设中的 first/secondFolderFieldId 迁移为 folderLevels */
+function migrateForm(form: any): FormState {
+  const next = { ...defaultForm, ...(form || {}) }
+  // 兼容旧版只有两级目录的配置
+  if (!Array.isArray(next.folderLevels) || next.folderLevels.length === 0) {
+    const levels: { fieldId: string }[] = []
+    if (form?.firstFolderFieldId) levels.push({ fieldId: form.firstFolderFieldId })
+    if (form?.secondFolderFieldId) levels.push({ fieldId: form.secondFolderFieldId })
+    next.folderLevels = levels
+  }
+  return next as FormState
+}
+
 function readPresets(): Preset[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return []
     const parsed = JSON.parse(raw)
-    return Array.isArray(parsed.presets) ? parsed.presets : []
+    const arr = Array.isArray(parsed.presets) ? parsed.presets : []
+    return arr.map((p: any) => ({
+      id: p.id || generateId(),
+      name: String(p.name || '未命名预设'),
+      createdAt: p.createdAt || Date.now(),
+      updatedAt: p.updatedAt || Date.now(),
+      form: migrateForm(p.form)
+    }))
   } catch {
     return []
   }
@@ -53,7 +111,7 @@ function readPresets(): Preset[] {
 
 function writePresets(presets: Preset[]) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 1, presets }))
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 2, presets }))
   } catch {
     // ignore in-memory fallback
   }
@@ -115,7 +173,7 @@ export function usePresets(form: FormState) {
   const loadPreset = useCallback(
     (id: string): FormState | null => {
       const preset = presets.find((p) => p.id === id)
-      return preset ? preset.form : null
+      return preset ? migrateForm(preset.form) : null
     },
     [presets]
   )
@@ -139,7 +197,7 @@ export function usePresets(form: FormState) {
             name: String(p.name).trim() || '未命名预设',
             createdAt: p.createdAt || Date.now(),
             updatedAt: Date.now(),
-            form: { ...(p.form as FormState) }
+            form: migrateForm(p.form)
           }))
         if (valid.length === 0) {
           return { ok: false, error: '没有解析到有效的预设' }
@@ -163,7 +221,7 @@ export function usePresets(form: FormState) {
   )
 
   const exportJson = useCallback((): string => {
-    return JSON.stringify({ version: 1, presets }, null, 2)
+    return JSON.stringify({ version: 2, presets }, null, 2)
   }, [presets])
 
   return {
