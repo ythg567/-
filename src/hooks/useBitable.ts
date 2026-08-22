@@ -120,13 +120,19 @@ export function useBitable() {
   )
 
   const fetchRecords = useCallback(
-    async (tableId: string, viewId: string, selectedRecordId?: string): Promise<IRecord[]> => {
+    async (tableId: string, viewId: string, selectedRecordIds?: string[]): Promise<IRecord[]> => {
       const info = getTableInfo(tableId)
       if (!info) return []
 
-      if (selectedRecordId) {
-        const rec = await info.table.getRecordById(selectedRecordId)
-        return [{ recordId: selectedRecordId, fields: rec?.fields || {} }]
+      // 只下载勾选的多条记录
+      if (selectedRecordIds && selectedRecordIds.length > 0) {
+        const recs = await Promise.all(
+          selectedRecordIds.map((id) => info.table.getRecordById(id))
+        )
+        return recs.map((rec, idx) => ({
+          recordId: selectedRecordIds[idx],
+          fields: rec?.fields || {}
+        }))
       }
 
       const list: IRecord[] = []
@@ -144,6 +150,22 @@ export function useBitable() {
         if (!res?.hasMore) break
       } while (pageToken)
       return list
+    },
+    [getTableInfo]
+  )
+
+  // 获取当前视图里被勾选（多选）的记录 ID 列表
+  const getSelectedRecordIds = useCallback(
+    async (tableId: string, viewId: string): Promise<string[]> => {
+      const info = getTableInfo(tableId)
+      if (!info || !viewId) return []
+      try {
+        const view = await info.table.getViewById(viewId)
+        const ids = (await view.getSelectedRecordIdList()) || []
+        return ids
+      } catch {
+        return []
+      }
     },
     [getTableInfo]
   )
@@ -198,6 +220,7 @@ export function useBitable() {
     setSelection,
     getTableInfo,
     fetchRecords,
+    getSelectedRecordIds,
     getCellString,
     getAttachmentUrl,
     checkDownloadPermission,

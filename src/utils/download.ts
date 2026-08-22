@@ -75,7 +75,7 @@ export interface IRecord {
 }
 
 export interface BitableApis {
-  fetchRecords: (tableId: string, viewId: string, selectedRecordId?: string) => Promise<IRecord[]>
+  fetchRecords: (tableId: string, viewId: string, selectedRecordIds?: string[]) => Promise<IRecord[]>
   getCellString: (tableId: string, fieldId: string, recordId: string) => Promise<string>
   getAttachmentUrl: (tableId: string, token: string, fieldId: string, recordId: string) => Promise<string>
 }
@@ -118,7 +118,7 @@ export class AttachmentDownloader {
     this.listeners.forEach((fn) => fn(event))
   }
 
-  async start(selectedRecordId?: string) {
+  async start(selectedRecordIds?: string[]) {
     this.usedNames.clear()
     this.cellList = []
     this.recordList = []
@@ -127,7 +127,7 @@ export class AttachmentDownloader {
     const records = await this.apis.fetchRecords(
       this.config.tableId,
       this.config.viewId,
-      selectedRecordId
+      selectedRecordIds
     )
 
     this.buildLists(records)

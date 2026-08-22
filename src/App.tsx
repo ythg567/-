@@ -227,6 +227,7 @@ export default function App() {
     selection,
     getTableInfo,
     fetchRecords,
+    getSelectedRecordIds,
     getCellString,
     getAttachmentUrl,
     checkDownloadPermission,
@@ -531,9 +532,13 @@ export default function App() {
       return
     }
 
-    if (selectedOnly && !selection.recordId) {
-      await showToast('当前没有选中的记录', 'warning')
-      return
+    let selectedRecordIds: string[] | undefined
+    if (selectedOnly) {
+      selectedRecordIds = await getSelectedRecordIds(form.tableId, form.viewId)
+      if (!selectedRecordIds || selectedRecordIds.length === 0) {
+        await showToast('当前没有选中的记录', 'warning')
+        return
+      }
     }
 
     const config: DownloadConfig = {
@@ -598,7 +603,7 @@ export default function App() {
       }
     })
 
-    await downloader.start(selectedOnly ? selection.recordId : undefined)
+    await downloader.start(selectedRecordIds)
   }
 
   const handleCopyMemberId = async () => {
