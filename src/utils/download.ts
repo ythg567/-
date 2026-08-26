@@ -67,6 +67,7 @@ export type DownloadEvent =
   | { type: 'error'; index: number; message: string }
   | { type: 'warn'; message: string }
   | { type: 'info'; message: string }
+  | { type: 'cancelled' }
   | { type: 'finished' }
 
 export type EventCallback = (event: DownloadEvent) => void
@@ -126,6 +127,8 @@ export class AttachmentDownloader {
   private usedNames = new Set<string>()
   private zipName: string
   private fieldMap: Map<string, string> = new Map()
+  /** 取消标志：cancel() 后所有正在进行的任务应尽快停止 */
+  private cancelled = false
 
   constructor(config: DownloadConfig, apis: BitableApis, zipName: string, fieldMap?: Map<string, string>) {
     this.config = config
@@ -138,8 +141,17 @@ export class AttachmentDownloader {
     this.listeners.push(event)
   }
 
+  /** 请求取消当前下载/导出。已发起的取链/拉取会尽快中止。 */
+  cancel() {
+    this.cancelled = true
+  }
+
   private emit(event: DownloadEvent) {
     this.listeners.forEach((fn) => fn(event))
+  }
+
+  private isCancelled() {
+    return this.cancelled
   }
 
   async start(selectedRecordIds?: string[]) {
@@ -153,6 +165,11 @@ export class AttachmentDownloader {
       this.config.viewId,
       selectedRecordIds
     )
+    if (this.isCancelled()) {
+      this.emit({ type: 'cancelled' })
+      this.emit({ type: 'finished' })
+      return
+    }
 
     this.buildLists(records)
     await this.applyFileNames()
@@ -389,6 +406,10 @@ export class AttachmentDownloader {
 
   private async fetchFile(cell: AttachmentItem): Promise<Blob | null> {
     this.emit({ type: 'progress', index: cell.order, name: cell.displayName, size: cell.size, percentage: 0 })
+    if (this.isCancelled()) {
+      this.emit({ type: 'error', index: cell.order, message: '已取消' })
+      return null
+    }
     try {
       await withRetry(() => this.resolveUrl(cell))
       const blob = await withRetry(() =>
@@ -452,9 +473,16 @@ export class AttachmentDownloader {
     }
 
     this.emit({ type: 'info', message: '正在生成 ZIP...' })
-    const content = await zip.generateAsync({ type: 'blob' }, (metadata) => {
-      this.emit({ type: 'progress', index: 0, name: '打包中', size: 0, percentage: Number(metadata.percent.toFixed(1)) })
-    })
+    const content = await zip.generateAsync(
+      { type: 'blob' },
+      (metadata) => {
+        this.emit({ type: 'progress', index: 0, name: '打包中', size: 0, percentage: Number(metadata.percent.toFixed(1)) })
+      }
+    )
+    if (this.isCancelled()) {
+      this.emit({ type: 'cancelled' })
+      return
+    }
     saveAs(content, `${this.zipName}.zip`)
   }
 
@@ -471,18 +499,40 @@ export class AttachmentDownloader {
       this.config.viewId,
       selectedRecordIds
     )
+    if (this.isCancelled()) {
+      this.emit({ type: 'cancelled' })
+      return []
+    }
     this.buildCells(records)
     if (this.cellList.length === 0) return []
 
+    this.emit({ type: 'pending', total: this.cellList.length })
+    this.emit({ type: 'info', message: `正在获取 ${this.cellList.length} 个附件的下载直链...` })
+
     // 解析直链时控制并发（避免触发飞书接口限流）
     const limit = Math.max(1, Math.min(this.config.concurrency || 6, 5))
+    let done = 0
     await mapWithConcurrency(this.cellList, limit, async (cell) => {
+      if (this.isCancelled()) return
       try {
         await this.resolveUrl(cell)
       } catch {
         cell.fileUrl = undefined
       }
+      done++
+      this.emit({
+        type: 'progress',
+        index: cell.order,
+        name: cell.displayName,
+        size: cell.size,
+        percentage: Math.round((done / this.cellList.length) * 100)
+      })
     })
+
+    if (this.isCancelled()) {
+      this.emit({ type: 'cancelled' })
+      return []
+    }
 
     return this.cellList
       .filter((c) => c.fileUrl)

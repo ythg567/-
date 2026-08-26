@@ -263,6 +263,13 @@ export default function App() {
     currentPercentage: 0
   })
   const [log, setLog] = useState<string[]>([])
+  /** 当前正在运行/最近完成的下载器实例，用于「取消」 */
+  const activeDownloaderRef = useRef<AttachmentDownloader | null>(null)
+  /** 最近一次导出的 IDM 直链文本，供「复制到剪贴板」 */
+  const [lastLinksText, setLastLinksText] = useState('')
+  const [exportDone, setExportDone] = useState(false)
+  /** 用户是否点击了取消 */
+  const cancelledRef = useRef(false)
 
   // Membership mock state
   const [memberInfo] = useState(() => {
@@ -568,6 +575,8 @@ export default function App() {
     setLog([])
     setIsDownloading(true)
     setProgressOpen(true)
+    setExportDone(false)
+    cancelledRef.current = false
 
     const downloader = new AttachmentDownloader(
       config,
@@ -575,6 +584,7 @@ export default function App() {
       activeTable?.name || '附件下载',
       fieldMap
     )
+    activeDownloaderRef.current = downloader
 
     downloader.on((event) => {
       switch (event.type) {
@@ -599,8 +609,12 @@ export default function App() {
         case 'info':
           setLog((l) => [...l, event.message])
           break
+        case 'cancelled':
+          setLog((l) => [...l, '已取消'])
+          break
         case 'finished':
           setIsDownloading(false)
+          activeDownloaderRef.current = null
           break
       }
     })
@@ -647,15 +661,62 @@ export default function App() {
       downloadExecution: form.downloadExecution
     }
 
+    setProgress({ total: 0, completed: 0, failed: 0, currentName: '', currentPercentage: 0 })
+    setLog([])
+    setIsDownloading(true)
+    setProgressOpen(true)
+    setExportDone(false)
+    setLastLinksText('')
+    cancelledRef.current = false
+
+    const downloader = new AttachmentDownloader(
+      config,
+      { fetchRecords, getCellString, getAttachmentUrl },
+      activeTable?.name || '附件下载',
+      fieldMap
+    )
+    activeDownloaderRef.current = downloader
+
+    downloader.on((event) => {
+      switch (event.type) {
+        case 'pending':
+          setProgress((p) => ({ ...p, total: event.total }))
+          break
+        case 'progress':
+          setProgress((p) => ({
+            ...p,
+            currentName: event.name,
+            currentPercentage: event.percentage,
+            completed: event.percentage === 100 ? p.completed + 1 : p.completed
+          }))
+          break
+        case 'error':
+          setProgress((p) => ({ ...p, failed: p.failed + 1 }))
+          setLog((l) => [...l, `失败 #${event.index}：${event.message}`])
+          break
+        case 'warn':
+          setLog((l) => [...l, `警告：${event.message}`])
+          break
+        case 'info':
+          setLog((l) => [...l, event.message])
+          break
+        case 'cancelled':
+          setLog((l) => [...l, '已取消'])
+          break
+        case 'finished':
+          setIsDownloading(false)
+          activeDownloaderRef.current = null
+          break
+      }
+    })
+
     try {
-      await showToast(`正在生成 ${scopeText} 的下载链接...`, 'info')
-      const downloader = new AttachmentDownloader(
-        config,
-        { fetchRecords, getCellString, getAttachmentUrl },
-        activeTable?.name || '附件下载',
-        fieldMap
-      )
       const links = await downloader.collectAttachmentLinks(selectedRecordIds)
+
+      if (cancelledRef.current) {
+        // 用户已取消，不导出文件
+        return
+      }
 
       if (links.length === 0) {
         await showToast('没有可导出的附件链接', 'warning')
@@ -663,8 +724,10 @@ export default function App() {
       }
 
       const stamp = new Date().toISOString().slice(0, 10)
-      // 1) IDM 专用：每行一个直链（IDM 批量导入即可多线程加速）
       const txt = links.map((l) => l.url).join('\n')
+      setLastLinksText(txt)
+      setExportDone(true)
+      // 1) IDM 专用：每行一个直链（IDM 批量导入即可多线程加速）
       saveAs(new Blob([txt], { type: 'text/plain;charset=utf-8' }), `下载链接_IDM_${stamp}.txt`)
       // 2) 明细对照：文件名 / 直链 / 记录ID（供参考，链接与上方一致）
       const detail = links.map((l) => ({ name: l.displayName, url: l.url, recordId: l.recordId }))
@@ -676,11 +739,28 @@ export default function App() {
       }, 300)
 
       await showToast(
-        `已导出 ${links.length} 个下载链接（${scopeText}）。IDM 可「批量添加任务」导入 .txt；飞书直链有时效，请尽快使用`,
+        `已导出 ${links.length} 个下载链接（${scopeText}）。可「复制到剪贴板」直接粘进 IDM；飞书直链有时效，请尽快使用`,
         'success'
       )
     } catch (err: any) {
       await showToast(`导出失败：${err?.message || '未知错误'}`, 'warning')
+    }
+  }
+
+  const handleCancel = () => {
+    cancelledRef.current = true
+    activeDownloaderRef.current?.cancel()
+    showToast('正在取消，请稍候...', 'info')
+  }
+
+  const handleCopyLinks = async () => {
+    if (!lastLinksText) return
+    try {
+      await navigator.clipboard.writeText(lastLinksText)
+      showToast('下载链接已复制到剪贴板，可直接粘进 IDM', 'success')
+    } catch {
+      // 剪贴板不可用时，退回提示用户手动复制
+      showToast('复制失败，请改用文件方式导入 IDM', 'warning')
     }
   }
 
@@ -1246,6 +1326,16 @@ export default function App() {
               </div>
             </div>
             <div className="modal-footer">
+              {isDownloading && (
+                <button className="btn-secondary" onClick={handleCancel}>
+                  取消
+                </button>
+              )}
+              {exportDone && lastLinksText && !isDownloading && (
+                <button className="btn-secondary" onClick={handleCopyLinks}>
+                  复制到剪贴板
+                </button>
+              )}
               {!isDownloading && (
                 <button className="btn-primary" onClick={() => setProgressOpen(false)}>
                   完成
