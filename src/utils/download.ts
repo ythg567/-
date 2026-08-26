@@ -61,13 +61,23 @@ export interface RecordExportItem {
   ext: string
 }
 
+export interface FileProgress {
+  index: number
+  name: string
+  size: number
+  loaded: number
+  status: 'pending' | 'downloading' | 'success' | 'failed' | 'cancelled'
+  message?: string
+}
+
 export type DownloadEvent =
-  | { type: 'pending'; total: number }
-  | { type: 'progress'; index: number; name: string; size: number; percentage: number }
+  | { type: 'pending'; total: number; totalBytes: number }
+  | { type: 'fileProgress'; item: FileProgress }
+  | { type: 'packaging'; percentage: number }
   | { type: 'error'; index: number; message: string }
   | { type: 'warn'; message: string }
   | { type: 'info'; message: string }
-  | { type: 'cancelled' }
+  | { type: 'cancelled'; partialSaved: boolean }
   | { type: 'finished' }
 
 export type EventCallback = (event: DownloadEvent) => void
@@ -166,7 +176,7 @@ export class AttachmentDownloader {
       selectedRecordIds
     )
     if (this.isCancelled()) {
-      this.emit({ type: 'cancelled' })
+      this.emit({ type: 'cancelled', partialSaved: false })
       this.emit({ type: 'finished' })
       return
     }
@@ -182,7 +192,11 @@ export class AttachmentDownloader {
       return
     }
 
-    this.emit({ type: 'pending', total })
+    const totalBytes =
+      this.cellList.reduce((sum, c) => sum + (c.size || 0), 0) +
+      this.recordList.reduce((sum, r) => sum + this.recordSize(r.content), 0)
+
+    this.emit({ type: 'pending', total, totalBytes })
 
     try {
       if (this.config.downloadMode === 'zip') {
@@ -193,6 +207,9 @@ export class AttachmentDownloader {
     } catch (err: any) {
       this.emit({ type: 'warn', message: err?.message || '下载过程出现错误' })
     } finally {
+      if (this.cancelled) {
+        this.emit({ type: 'cancelled', partialSaved: true })
+      }
       this.emit({ type: 'finished' })
     }
   }
@@ -381,19 +398,25 @@ export class AttachmentDownloader {
     cell.fileUrl = url
   }
 
-  private async downloadBlob(url: string, onProgress: (p: number) => void): Promise<Blob> {
+  private async downloadBlob(
+    url: string,
+    totalSize: number,
+    onProgress: (percentage: number, loaded: number) => void
+  ): Promise<{ blob: Blob; loaded: number }> {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest()
       xhr.open('GET', url, true)
       xhr.responseType = 'blob'
       xhr.onprogress = (e) => {
-        if (e.lengthComputable) {
-          onProgress(Math.round((e.loaded * 100) / e.total))
+        const total = e.lengthComputable ? e.total : totalSize
+        if (total > 0) {
+          onProgress(Math.round((e.loaded * 100) / total), e.loaded)
         }
       }
       xhr.onload = () => {
         if (xhr.status >= 200 && xhr.status < 300) {
-          resolve(xhr.response)
+          const blob: Blob = xhr.response
+          resolve({ blob, loaded: blob.size })
         } else {
           reject(new Error(`下载失败，HTTP ${xhr.status}`))
         }
@@ -404,29 +427,41 @@ export class AttachmentDownloader {
     })
   }
 
+  private recordSize(content: string): number {
+    return new TextEncoder().encode(content).length
+  }
+
+  private emitFileProgress(
+    index: number,
+    name: string,
+    size: number,
+    loaded: number,
+    status: FileProgress['status'],
+    message?: string
+  ) {
+    this.emit({ type: 'fileProgress', item: { index, name, size, loaded, status, message } })
+  }
+
   private async fetchFile(cell: AttachmentItem): Promise<Blob | null> {
-    this.emit({ type: 'progress', index: cell.order, name: cell.displayName, size: cell.size, percentage: 0 })
+    this.emitFileProgress(cell.order, cell.displayName, cell.size, 0, 'downloading')
     if (this.isCancelled()) {
+      this.emitFileProgress(cell.order, cell.displayName, cell.size, 0, 'cancelled', '已取消')
       this.emit({ type: 'error', index: cell.order, message: '已取消' })
       return null
     }
     try {
       await withRetry(() => this.resolveUrl(cell))
-      const blob = await withRetry(() =>
-        this.downloadBlob(cell.fileUrl!, (percentage) => {
-          this.emit({
-            type: 'progress',
-            index: cell.order,
-            name: cell.displayName,
-            size: cell.size,
-            percentage
-          })
+      const { blob, loaded } = await withRetry(() =>
+        this.downloadBlob(cell.fileUrl!, cell.size || 0, (_percentage, loadedBytes) => {
+          this.emitFileProgress(cell.order, cell.displayName, cell.size, loadedBytes, 'downloading')
         })
       )
-      this.emit({ type: 'progress', index: cell.order, name: cell.displayName, size: cell.size, percentage: 100 })
+      this.emitFileProgress(cell.order, cell.displayName, cell.size, loaded, 'success')
       return blob
     } catch (err: any) {
-      this.emit({ type: 'error', index: cell.order, message: err?.message || '下载失败' })
+      const msg = err?.message || '下载失败'
+      this.emitFileProgress(cell.order, cell.displayName, cell.size, 0, 'failed', msg)
+      this.emit({ type: 'error', index: cell.order, message: msg })
       return null
     }
   }
@@ -442,6 +477,7 @@ export class AttachmentDownloader {
       if (!blob) continue
       const finalName = getUniqueName(cell.displayName, '', this.usedNames)
       this.triggerDownload(blob, finalName)
+      // 触发浏览器下载后标记为最终成功（fetchFile 里已 success，这里不必重复）
       await new Promise((r) => setTimeout(r, 120))
     }
 
@@ -449,40 +485,50 @@ export class AttachmentDownloader {
       const blob = new Blob([rec.content], { type: 'text/plain;charset=utf-8' })
       const finalName = getUniqueName(rec.displayName, '', this.usedNames)
       this.triggerDownload(blob, finalName)
+      const size = this.recordSize(rec.content)
+      this.emitFileProgress(rec.order, rec.displayName, size, size, 'success')
       await new Promise((r) => setTimeout(r, 120))
     }
   }
 
   private async downloadAsZip() {
     const limit = Math.max(1, this.config.concurrency || 6)
-    // 并发拉取所有附件字节，再统一打包
+    // 并发拉取所有附件字节；取消后仍把已成功拉取的部分打包
     const blobs = await mapWithConcurrency(this.cellList, limit, (cell) => this.fetchFile(cell))
 
     const zip = new JSZip()
+    let added = 0
+
     for (let i = 0; i < this.cellList.length; i++) {
       const cell = this.cellList[i]
       const blob = blobs[i]
       if (!blob) continue
       const finalName = getUniqueName(cell.displayName, cell.path, this.usedNames)
       zip.file(`${cell.path}${finalName}`, blob)
+      added++
     }
     for (const rec of this.recordList) {
       const blob = new Blob([rec.content], { type: 'text/plain;charset=utf-8' })
       const finalName = getUniqueName(rec.displayName, rec.path, this.usedNames)
       zip.file(`${rec.path}${finalName}`, blob)
+      added++
+      const size = this.recordSize(rec.content)
+      this.emitFileProgress(rec.order, rec.displayName, size, size, 'success')
+    }
+
+    if (added === 0) {
+      this.emit({ type: 'info', message: '没有成功下载的内容，未生成 ZIP。' })
+      return
     }
 
     this.emit({ type: 'info', message: '正在生成 ZIP...' })
+    // 用 STORE（不压缩）打包，避免对图片/PDF 做无用压缩，速度最快
     const content = await zip.generateAsync(
-      { type: 'blob' },
+      { type: 'blob', compression: 'STORE' },
       (metadata) => {
-        this.emit({ type: 'progress', index: 0, name: '打包中', size: 0, percentage: Number(metadata.percent.toFixed(1)) })
+        this.emit({ type: 'packaging', percentage: Number(metadata.percent.toFixed(1)) })
       }
     )
-    if (this.isCancelled()) {
-      this.emit({ type: 'cancelled' })
-      return
-    }
     saveAs(content, `${this.zipName}.zip`)
   }
 
@@ -500,37 +546,38 @@ export class AttachmentDownloader {
       selectedRecordIds
     )
     if (this.isCancelled()) {
-      this.emit({ type: 'cancelled' })
+      this.emit({ type: 'cancelled', partialSaved: false })
       return []
     }
     this.buildCells(records)
     if (this.cellList.length === 0) return []
 
-    this.emit({ type: 'pending', total: this.cellList.length })
+    const linkTotalBytes = this.cellList.reduce((sum, c) => sum + (c.size || 0), 0)
+    this.emit({ type: 'pending', total: this.cellList.length, totalBytes: linkTotalBytes })
     this.emit({ type: 'info', message: `正在获取 ${this.cellList.length} 个附件的下载直链...` })
 
     // 解析直链时控制并发（避免触发飞书接口限流）
     const limit = Math.max(1, Math.min(this.config.concurrency || 6, 5))
     let done = 0
     await mapWithConcurrency(this.cellList, limit, async (cell) => {
-      if (this.isCancelled()) return
+      if (this.isCancelled()) {
+        this.emitFileProgress(cell.order, cell.displayName, cell.size, 0, 'cancelled', '已取消')
+        this.emit({ type: 'error', index: cell.order, message: '已取消' })
+        return
+      }
       try {
         await this.resolveUrl(cell)
-      } catch {
+        this.emitFileProgress(cell.order, cell.displayName, cell.size, cell.size, 'success')
+      } catch (err: any) {
         cell.fileUrl = undefined
+        this.emitFileProgress(cell.order, cell.displayName, cell.size, 0, 'failed', err?.message || '获取链接失败')
+        this.emit({ type: 'error', index: cell.order, message: err?.message || '获取链接失败' })
       }
       done++
-      this.emit({
-        type: 'progress',
-        index: cell.order,
-        name: cell.displayName,
-        size: cell.size,
-        percentage: Math.round((done / this.cellList.length) * 100)
-      })
     })
 
     if (this.isCancelled()) {
-      this.emit({ type: 'cancelled' })
+      this.emit({ type: 'cancelled', partialSaved: false })
       return []
     }
 

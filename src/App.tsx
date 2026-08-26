@@ -122,6 +122,35 @@ const Icons = {
 
 type Tab = 'download' | 'my'
 
+type FileItemStatus = 'pending' | 'downloading' | 'success' | 'failed' | 'cancelled'
+interface FileItem {
+  index: number
+  name: string
+  size: number
+  loaded: number
+  status: FileItemStatus
+  message?: string
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes <= 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB']
+  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1)
+  return `${(bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 2)}${units[i]}`
+}
+
+function formatSpeed(bps: number): string {
+  return `${formatBytes(bps)}/s`
+}
+
+function formatSeconds(sec: number): string {
+  if (!isFinite(sec) || sec <= 0) return '--'
+  if (sec < 60) return `${Math.ceil(sec)}秒`
+  const m = Math.floor(sec / 60)
+  const s = Math.ceil(sec % 60)
+  return `${m}分${s}秒`
+}
+
 function Info({ tip }: { tip: string }) {
   return (
     <span className="info-icon" title={tip}>
@@ -255,23 +284,24 @@ export default function App() {
 
   const [isDownloading, setIsDownloading] = useState(false)
   const [progressOpen, setProgressOpen] = useState(false)
-  const [progress, setProgress] = useState({
-    total: 0,
-    completed: 0,
-    failed: 0,
-    currentName: '',
-    currentPercentage: 0
-  })
-  const [log, setLog] = useState<string[]>([])
+  /** 弹窗模式：下载 / 导出 IDM 链接 */
+  const [progressMode, setProgressMode] = useState<'download' | 'export'>('download')
   /** 当前正在运行/最近完成的下载器实例，用于「取消」 */
   const activeDownloaderRef = useRef<AttachmentDownloader | null>(null)
+  /** 用户是否点击了取消 */
+  const cancelledRef = useRef(false)
   /** 最近一次导出的 IDM 直链文本，供「复制到剪贴板」 */
   const [lastLinksText, setLastLinksText] = useState('')
   const [exportDone, setExportDone] = useState(false)
-  /** 弹窗标题：下载进度 / 导出下载链接 */
-  const [progressMode, setProgressMode] = useState<'download' | 'export'>('download')
-  /** 用户是否点击了取消 */
-  const cancelledRef = useRef(false)
+
+  const [fileItems, setFileItems] = useState<Map<number, FileItem>>(new Map())
+  const [totalFiles, setTotalFiles] = useState(0)
+  const [totalBytes, setTotalBytes] = useState(0)
+  const [startTime, setStartTime] = useState<number | null>(null)
+  const [packagingPercent, setPackagingPercent] = useState(0)
+  const [isPackaging, setIsPackaging] = useState(false)
+  const [detailTab, setDetailTab] = useState<'all' | 'running' | 'failed'>('all')
+  const [downloadLog, setDownloadLog] = useState<string[]>([])
 
   // Membership mock state
   const [memberInfo] = useState(() => {
@@ -573,8 +603,14 @@ export default function App() {
       downloadExecution: form.downloadExecution
     }
 
-    setProgress({ total: 0, completed: 0, failed: 0, currentName: '', currentPercentage: 0 })
-    setLog([])
+    setFileItems(new Map())
+    setTotalFiles(0)
+    setTotalBytes(0)
+    setStartTime(Date.now())
+    setPackagingPercent(0)
+    setIsPackaging(false)
+    setDetailTab('all')
+    setDownloadLog([])
     setIsDownloading(true)
     setProgressOpen(true)
     setExportDone(false)
@@ -592,31 +628,35 @@ export default function App() {
     downloader.on((event) => {
       switch (event.type) {
         case 'pending':
-          setProgress((p) => ({ ...p, total: event.total }))
+          setTotalFiles(event.total)
+          setTotalBytes(event.totalBytes)
           break
-        case 'progress':
-          setProgress((p) => ({
-            ...p,
-            currentName: event.name,
-            currentPercentage: event.percentage,
-            completed: event.percentage === 100 ? p.completed + 1 : p.completed
-          }))
+        case 'fileProgress':
+          setFileItems((prev) => {
+            const next = new Map(prev)
+            next.set(event.item.index, event.item)
+            return next
+          })
+          break
+        case 'packaging':
+          setIsPackaging(true)
+          setPackagingPercent(event.percentage)
           break
         case 'error':
-          setProgress((p) => ({ ...p, failed: p.failed + 1 }))
-          setLog((l) => [...l, `失败 #${event.index}：${event.message}`])
+          setDownloadLog((l) => [...l, `失败 #${event.index}：${event.message}`])
           break
         case 'warn':
-          setLog((l) => [...l, `警告：${event.message}`])
+          setDownloadLog((l) => [...l, `警告：${event.message}`])
           break
         case 'info':
-          setLog((l) => [...l, event.message])
+          setDownloadLog((l) => [...l, event.message])
           break
         case 'cancelled':
-          setLog((l) => [...l, '已取消'])
+          setDownloadLog((l) => [...l, event.partialSaved ? '已取消，已打包已下载内容' : '已取消'])
           break
         case 'finished':
           setIsDownloading(false)
+          setIsPackaging(false)
           activeDownloaderRef.current = null
           break
       }
@@ -671,8 +711,14 @@ export default function App() {
       downloadExecution: form.downloadExecution
     }
 
-    setProgress({ total: 0, completed: 0, failed: 0, currentName: '', currentPercentage: 0 })
-    setLog([])
+    setFileItems(new Map())
+    setTotalFiles(0)
+    setTotalBytes(0)
+    setStartTime(Date.now())
+    setPackagingPercent(0)
+    setIsPackaging(false)
+    setDetailTab('all')
+    setDownloadLog([])
     setIsDownloading(true)
     setProgressOpen(true)
     setExportDone(false)
@@ -691,31 +737,31 @@ export default function App() {
     downloader.on((event) => {
       switch (event.type) {
         case 'pending':
-          setProgress((p) => ({ ...p, total: event.total }))
+          setTotalFiles(event.total)
+          setTotalBytes(event.totalBytes)
           break
-        case 'progress':
-          setProgress((p) => ({
-            ...p,
-            currentName: event.name,
-            currentPercentage: event.percentage,
-            completed: event.percentage === 100 ? p.completed + 1 : p.completed
-          }))
+        case 'fileProgress':
+          setFileItems((prev) => {
+            const next = new Map(prev)
+            next.set(event.item.index, event.item)
+            return next
+          })
           break
         case 'error':
-          setProgress((p) => ({ ...p, failed: p.failed + 1 }))
-          setLog((l) => [...l, `失败 #${event.index}：${event.message}`])
+          setDownloadLog((l) => [...l, `失败 #${event.index}：${event.message}`])
           break
         case 'warn':
-          setLog((l) => [...l, `警告：${event.message}`])
+          setDownloadLog((l) => [...l, `警告：${event.message}`])
           break
         case 'info':
-          setLog((l) => [...l, event.message])
+          setDownloadLog((l) => [...l, event.message])
           break
         case 'cancelled':
-          setLog((l) => [...l, '已取消'])
+          setDownloadLog((l) => [...l, '已取消'])
           break
         case 'finished':
           setIsDownloading(false)
+          setIsPackaging(false)
           activeDownloaderRef.current = null
           break
       }
@@ -1304,67 +1350,272 @@ export default function App() {
             if (!isDownloading) setProgressOpen(false)
           }}
         >
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
+          <div className="modal download-modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h4>{progressMode === 'export' ? '导出下载链接' : '下载进度'}</h4>
+              <h4>{progressMode === 'export' ? '导出下载链接' : '文件下载'}</h4>
               {!isDownloading && (
                 <button className="close" onClick={() => setProgressOpen(false)}>
                   {Icons.close}
                 </button>
               )}
             </div>
-            <div className="modal-body">
-              <div className="stat-row">
-                <span>总数：{progress.total}</span>
-                <span>成功：{progress.completed}</span>
-                <span>失败：{progress.failed}</span>
-              </div>
-              {progress.total > 0 && (
-                <div className="current-file">
-                  <div className="file-name" title={progress.currentName}>
-                    {progress.currentName ? `正在处理：${progress.currentName}` : '准备中...'}
-                  </div>
-                  <div className="progress-bar">
-                    <div
-                      className="progress-fill"
-                      style={{
-                        width: `${progress.total ? Math.round((progress.completed / progress.total) * 100) : 0}%`
-                      }}
-                    />
-                  </div>
-                  <div className="progress-text">
-                    总进度 {progress.completed}/{progress.total}（
-                    {progress.total ? Math.round((progress.completed / progress.total) * 100) : 0}%）
-                  </div>
-                </div>
-              )}
-              <div className="log">
-                {log.slice(-10).map((line, i) => (
-                  <div key={i}>{line}</div>
-                ))}
-                {log.length === 0 && <div className="muted">等待开始...</div>}
-              </div>
-            </div>
-            <div className="modal-footer">
-              {isDownloading && (
-                <button className="btn-secondary" onClick={handleCancel}>
-                  取消
-                </button>
-              )}
-              {exportDone && lastLinksText && !isDownloading && (
-                <button className="btn-secondary" onClick={handleCopyLinks}>
-                  复制到剪贴板
-                </button>
-              )}
-              {!isDownloading && (
-                <button className="btn-primary" onClick={() => setProgressOpen(false)}>
-                  完成
-                </button>
-              )}
-            </div>
+            <DownloadProgressBody
+              progressMode={progressMode}
+              isDownloading={isDownloading}
+              isPackaging={isPackaging}
+              fileItems={fileItems}
+              totalFiles={totalFiles}
+              totalBytes={totalBytes}
+              startTime={startTime}
+              packagingPercent={packagingPercent}
+              detailTab={detailTab}
+              setDetailTab={setDetailTab}
+              downloadLog={downloadLog}
+              onCancel={handleCancel}
+              onCopyLinks={handleCopyLinks}
+              exportDone={exportDone}
+              lastLinksText={lastLinksText}
+              onClose={() => setProgressOpen(false)}
+            />
           </div>
         </div>
       )}
     </div>
   )
+}
+
+interface DownloadProgressBodyProps {
+  progressMode: 'download' | 'export'
+  isDownloading: boolean
+  isPackaging: boolean
+  fileItems: Map<number, FileItem>
+  totalFiles: number
+  totalBytes: number
+  startTime: number | null
+  packagingPercent: number
+  detailTab: 'all' | 'running' | 'failed'
+  setDetailTab: (tab: 'all' | 'running' | 'failed') => void
+  downloadLog: string[]
+  onCancel: () => void
+  onCopyLinks: () => void
+  exportDone: boolean
+  lastLinksText: string
+  onClose: () => void
+}
+
+function DownloadProgressBody({
+  progressMode,
+  isDownloading,
+  isPackaging,
+  fileItems,
+  totalFiles,
+  totalBytes,
+  startTime,
+  packagingPercent,
+  detailTab,
+  setDetailTab,
+  downloadLog,
+  onCancel,
+  onCopyLinks,
+  exportDone,
+  lastLinksText,
+  onClose
+}: DownloadProgressBodyProps) {
+  const items = useMemo(() => Array.from(fileItems.values()).sort((a, b) => a.index - b.index), [fileItems])
+
+  const { completedCount, failedCount, loadedBytes } = useMemo(() => {
+    let completed = 0
+    let failed = 0
+    let loaded = 0
+    for (const item of items) {
+      if (item.status === 'success') completed++
+      if (item.status === 'failed' || item.status === 'cancelled') failed++
+      loaded += item.loaded
+    }
+    return { completedCount: completed, failedCount: failed, loadedBytes: loaded }
+  }, [items])
+
+  const overallPercent = useMemo(() => {
+    if (totalBytes <= 0) return 0
+    return Math.min(100, Math.round((loadedBytes / totalBytes) * 100))
+  }, [loadedBytes, totalBytes])
+
+  const { speedText, etaText } = useMemo(() => {
+    if (!startTime || loadedBytes <= 0) return { speedText: '--', etaText: '--' }
+    const elapsed = (Date.now() - startTime) / 1000
+    const speed = elapsed > 0 ? loadedBytes / elapsed : 0
+    const remaining = totalBytes > loadedBytes ? totalBytes - loadedBytes : 0
+    const eta = speed > 0 ? remaining / speed : 0
+    return { speedText: formatSpeed(speed), etaText: formatSeconds(eta) }
+  }, [startTime, loadedBytes, totalBytes])
+
+  const isAllDone = !isDownloading && !isPackaging
+  const headerStatus = useMemo(() => {
+    if (isDownloading) return { text: progressMode === 'export' ? '获取链接中...' : '下载中...', color: 'blue' }
+    if (failedCount > 0 && completedCount === 0) return { text: '下载失败', color: 'red' }
+    if (failedCount > 0) return { text: '部分完成', color: 'orange' }
+    return { text: progressMode === 'export' ? '导出成功' : '下载成功', color: 'green' }
+  }, [isDownloading, completedCount, failedCount, progressMode])
+
+  const filteredItems = useMemo(() => {
+    if (detailTab === 'running') return items.filter((i) => i.status === 'pending' || i.status === 'downloading')
+    if (detailTab === 'failed') return items.filter((i) => i.status === 'failed' || i.status === 'cancelled')
+    return items
+  }, [items, detailTab])
+
+  const runningCount = items.filter((i) => i.status === 'pending' || i.status === 'downloading').length
+
+  return (
+    <>
+      <div className="modal-body download-modal-body">
+        {/* 顶部状态卡片 */}
+        <div className="download-status-card">
+          <div className="download-status-left">
+            <div className={`download-status-icon ${headerStatus.color}`}>{Icons.cloudDownload}</div>
+            <div className="download-status-text">{headerStatus.text}</div>
+          </div>
+          <div className={`download-status-percent ${headerStatus.color}`}>{overallPercent}%</div>
+        </div>
+        <div className="download-progress-bar">
+          <div
+            className={`download-progress-fill ${headerStatus.color}`}
+            style={{ width: `${overallPercent}%` }}
+          />
+        </div>
+
+        {/* 统计网格 */}
+        <div className="download-stats">
+          <div className="download-stat">
+            <div className="download-stat-label">文件总数</div>
+            <div className="download-stat-value">{totalFiles}</div>
+          </div>
+          <div className="download-stat">
+            <div className="download-stat-label">已完成</div>
+            <div className="download-stat-value success">{completedCount}</div>
+          </div>
+          <div className="download-stat">
+            <div className="download-stat-label">失败数量</div>
+            <div className="download-stat-value fail">{failedCount}</div>
+          </div>
+          <div className="download-stat">
+            <div className="download-stat-label">总大小</div>
+            <div className="download-stat-value">{formatBytes(totalBytes)}</div>
+          </div>
+        </div>
+
+        {/* 速度 / 剩余时间 */}
+        <div className="download-metrics">
+          <div className="download-metric">
+            <span className="download-metric-icon">{Icons.download2}</span>
+            <span className="download-metric-label">下载速度</span>
+            <span className="download-metric-value">{speedText}</span>
+          </div>
+          <div className="download-metric">
+            <span className="download-metric-icon">{Icons.info}</span>
+            <span className="download-metric-label">剩余时间</span>
+            <span className="download-metric-value">{etaText}</span>
+          </div>
+        </div>
+
+        {/* 打包进度（ZIP 模式或导出模式不显示） */}
+        {progressMode === 'download' && (isPackaging || packagingPercent > 0) && (
+          <div className="packaging-section">
+            <div className="packaging-label">打包文件生成中：{packagingPercent.toFixed(2)}%已完成。</div>
+            <div className="download-progress-bar small">
+              <div
+                className="download-progress-fill green"
+                style={{ width: `${packagingPercent}%` }}
+              />
+            </div>
+            <div className="packaging-percent">{Math.round(packagingPercent)}%</div>
+          </div>
+        )}
+
+        {/* 下载详情 */}
+        {items.length > 0 && (
+          <div className="download-details">
+            <div className="download-details-header">
+              <div className="download-details-title">下载详情</div>
+            </div>
+            <div className="download-details-tabs">
+              <button className={detailTab === 'all' ? 'active' : ''} onClick={() => setDetailTab('all')}>
+                全部
+              </button>
+              <button className={detailTab === 'running' ? 'active' : ''} onClick={() => setDetailTab('running')}>
+                进行中{runningCount > 0 ? ` (${runningCount})` : ''}
+              </button>
+              <button className={detailTab === 'failed' ? 'active' : ''} onClick={() => setDetailTab('failed')}>
+                失败
+              </button>
+            </div>
+            <div className="download-file-list">
+              {filteredItems.map((item) => (
+                <div key={item.index} className={`download-file-item ${item.status}`}>
+                  <div className="download-file-main">
+                    <div className="download-file-name" title={item.name}>
+                      {item.name}
+                    </div>
+                    <StatusBadge status={item.status} />
+                  </div>
+                  <div className="download-file-progress-row">
+                    <div className="download-progress-bar tiny">
+                      <div
+                        className={`download-progress-fill ${item.status}`}
+                        style={{ width: `${item.size > 0 ? Math.min(100, Math.round((item.loaded / item.size) * 100)) : 0}%` }}
+                      />
+                    </div>
+                    <div className="download-file-percent">
+                      {item.size > 0 ? Math.min(100, Math.round((item.loaded / item.size) * 100)) : 0}% · {formatBytes(item.size)}
+                    </div>
+                  </div>
+                  {item.message && <div className="download-file-message">{item.message}</div>}
+                </div>
+              ))}
+              {filteredItems.length === 0 && (
+                <div className="download-empty">暂无记录</div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* 简洁日志（保留关键警告/错误） */}
+        {downloadLog.length > 0 && (
+          <div className="download-log">
+            {downloadLog.slice(-5).map((line, i) => (
+              <div key={i}>{line}</div>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="modal-footer download-modal-footer">
+        {isDownloading && (
+          <button className="btn-secondary" onClick={onCancel}>
+            取消
+          </button>
+        )}
+        {exportDone && lastLinksText && !isDownloading && (
+          <button className="btn-secondary" onClick={onCopyLinks}>
+            复制到剪贴板
+          </button>
+        )}
+        {isAllDone && (
+          <button className="btn-primary" onClick={onClose}>
+            完成
+          </button>
+        )}
+      </div>
+    </>
+  )
+}
+
+function StatusBadge({ status }: { status: FileItem['status'] }) {
+  const map: Record<FileItem['status'], { text: string; cls: string }> = {
+    pending: { text: '等待中', cls: 'pending' },
+    downloading: { text: '下载中', cls: 'downloading' },
+    success: { text: '下载成功', cls: 'success' },
+    failed: { text: '下载失败', cls: 'failed' },
+    cancelled: { text: '已取消', cls: 'cancelled' }
+  }
+  const { text, cls } = map[status]
+  return <span className={`download-status-badge ${cls}`}>{text}</span>
 }

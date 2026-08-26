@@ -1077,3 +1077,386 @@ input:disabled {
   font-size: 13px;
   cursor: pointer;
 }
+
+/* ============== 文件下载弹窗新 UI ============== */
+.download-modal {
+  width: 420px;
+  max-width: 92vw;
+  max-height: 80vh;
+}
+
+.download-modal-body {
+  padding: 16px 20px;
+  overflow-y: auto;
+}
+
+/* 顶部状态卡片 */
+.download-status-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.download-status-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.download-status-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+}
+
+.download-status-icon.blue {
+  background: #3370ff;
+}
+.download-status-icon.green {
+  background: #34c759;
+}
+.download-status-icon.orange {
+  background: #ff9f0a;
+}
+.download-status-icon.red {
+  background: #f54a45;
+}
+
+.download-status-text {
+  font-size: 16px;
+  font-weight: 600;
+  color: #1f2329;
+}
+
+.download-status-percent {
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.download-status-percent.blue {
+  color: #3370ff;
+}
+.download-status-percent.green {
+  color: #34c759;
+}
+.download-status-percent.orange {
+  color: #ff9f0a;
+}
+.download-status-percent.red {
+  color: #f54a45;
+}
+
+/* 进度条 */
+.download-progress-bar {
+  height: 8px;
+  background: #e5e6eb;
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 16px;
+}
+
+.download-progress-bar.small {
+  height: 6px;
+  margin-bottom: 0;
+  flex: 1;
+}
+
+.download-progress-bar.tiny {
+  height: 4px;
+  margin-bottom: 0;
+  flex: 1;
+}
+
+.download-progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  transition: width 0.2s linear;
+}
+
+.download-progress-fill.blue {
+  background: #3370ff;
+}
+.download-progress-fill.green {
+  background: #34c759;
+}
+.download-progress-fill.orange {
+  background: #ff9f0a;
+}
+.download-progress-fill.red {
+  background: #f54a45;
+}
+.download-progress-fill.pending,
+.download-progress-fill.downloading {
+  background: #3370ff;
+}
+.download-progress-fill.success {
+  background: #34c759;
+}
+.download-progress-fill.failed,
+.download-progress-fill.cancelled {
+  background: #f54a45;
+}
+
+/* 统计网格 */
+.download-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.download-stat {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #f5f6f7;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.download-stat-label {
+  font-size: 13px;
+  color: #646a73;
+}
+
+.download-stat-value {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1f2329;
+}
+
+.download-stat-value.success {
+  color: #34c759;
+}
+.download-stat-value.fail {
+  color: #f54a45;
+}
+
+/* 速度 / 剩余时间 */
+.download-metrics {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.download-metric {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #646a73;
+}
+
+.download-metric-icon {
+  color: #3370ff;
+  display: inline-flex;
+}
+
+.download-metric-label {
+  min-width: 56px;
+}
+
+.download-metric-value {
+  color: #1f2329;
+  font-weight: 500;
+  margin-left: auto;
+}
+
+/* 打包进度 */
+.packaging-section {
+  background: #f5f6f7;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 16px;
+}
+
+.packaging-label {
+  font-size: 13px;
+  color: #1f2329;
+  margin-bottom: 8px;
+}
+
+.packaging-percent {
+  font-size: 12px;
+  color: #646a73;
+  margin-left: 10px;
+  min-width: 32px;
+  text-align: right;
+}
+
+.packaging-section {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.packaging-section .download-progress-bar.small {
+  flex: 1;
+}
+
+/* 下载详情 */
+.download-details {
+  border-top: 1px solid #ebecef;
+  padding-top: 12px;
+  margin-bottom: 12px;
+}
+
+.download-details-header {
+  margin-bottom: 10px;
+}
+
+.download-details-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1f2329;
+}
+
+.download-details-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.download-details-tabs button {
+  padding: 5px 12px;
+  border: none;
+  border-radius: 4px;
+  background: #f2f3f5;
+  color: #646a73;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.download-details-tabs button.active {
+  background: #3370ff;
+  color: #fff;
+}
+
+.download-file-list {
+  max-height: 220px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.download-file-item {
+  background: #f5f6f7;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.download-file-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.download-file-name {
+  font-size: 13px;
+  color: #1f2329;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+}
+
+.download-status-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.download-status-badge.success {
+  background: #e6f7e6;
+  color: #34c759;
+}
+.download-status-badge.downloading {
+  background: #e8f0ff;
+  color: #3370ff;
+}
+.download-status-badge.pending {
+  background: #f2f3f5;
+  color: #8f959e;
+}
+.download-status-badge.failed {
+  background: #ffeae9;
+  color: #f54a45;
+}
+.download-status-badge.cancelled {
+  background: #f2f3f5;
+  color: #8f959e;
+}
+
+.download-file-progress-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.download-file-percent {
+  font-size: 12px;
+  color: #646a73;
+  white-space: nowrap;
+  min-width: 90px;
+  text-align: right;
+}
+
+.download-file-message {
+  font-size: 11px;
+  color: #f54a45;
+  margin-top: 4px;
+}
+
+.download-empty {
+  text-align: center;
+  font-size: 12px;
+  color: #8f959e;
+  padding: 16px 0;
+}
+
+.download-log {
+  background: #f5f6f7;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 11px;
+  color: #646a73;
+  max-height: 80px;
+  overflow-y: auto;
+}
+
+.download-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.download-modal-footer .btn-secondary {
+  background: #fff;
+  color: #1f2329;
+  border: 1px solid #dee0e3;
+}
+
+.download-modal-footer .btn-secondary:hover {
+  background: #f2f3f5;
+}
+
+.download-modal-footer .btn-primary {
+  background: #3370ff;
+  color: #fff;
+}
+
+.download-modal-footer .btn-primary:hover {
+  background: #245bdb;
+}
