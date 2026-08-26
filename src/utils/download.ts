@@ -33,6 +33,8 @@ export interface DownloadConfig {
   ignoreEmptyField: boolean
   /** 空字段处理方式 */
   emptyFieldHandling: 'ignore' | 'keep'
+  /** 同时下载的文件并发数 */
+  concurrency: number
   /** 下载执行方式，当前仅支持浏览器直接下载 */
   downloadExecution: 'browser'
 }
@@ -91,6 +93,28 @@ async function withRetry<T>(fn: () => Promise<T>, retries = 2, delayMs = 800): P
     }
   }
   throw lastErr
+}
+
+/**
+ * 并发执行：最多同时运行 limit 个异步任务，保持结果顺序与输入一致。
+ * 用于把「串行下载」改为「并行下载」，大幅提升多文件场景的吞吐。
+ */
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  iterator: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  const results: R[] = new Array(items.length)
+  let cursor = 0
+  async function worker() {
+    while (cursor < items.length) {
+      const i = cursor++
+      results[i] = await iterator(items[i], i)
+    }
+  }
+  const n = Math.max(1, Math.min(limit || 1, items.length))
+  await Promise.all(Array.from({ length: n }, () => worker()))
+  return results
 }
 
 export class AttachmentDownloader {
@@ -156,26 +180,8 @@ export class AttachmentDownloader {
     }
   }
 
-  private buildLists(records: IRecord[]) {
-    let order = 1
+  private buildCells(records: IRecord[]) {
     for (const record of records) {
-      // 构建记录内容导出项
-      if (this.config.recordContent && this.config.exportFieldIds.length > 0) {
-        const content = this.buildRecordContent(record)
-        if (content) {
-          const ext = this.config.exportFormat === 'md' ? '.md' : this.config.exportFormat === 'json' ? '.json' : '.txt'
-          this.recordList.push({
-            recordId: record.recordId,
-            path: '',
-            displayName: `记录内容${ext}`,
-            order: order++,
-            content,
-            ext
-          })
-        }
-      }
-
-      // 构建附件列表
       for (const fieldId of this.config.attachmentFieldIds) {
         const cell = record.fields[fieldId]
         if (!Array.isArray(cell)) continue
@@ -188,13 +194,43 @@ export class AttachmentDownloader {
             type: att.type || '',
             recordId: record.recordId,
             fieldId,
-            order: order++,
+            order: 0,
             path: '',
             displayName: sanitizeFileName(att.name)
           })
         }
       }
     }
+  }
+
+  private buildRecordExports(records: IRecord[]) {
+    if (!this.config.recordContent || this.config.exportFieldIds.length === 0) return
+    let order = 1
+    for (const record of records) {
+      const content = this.buildRecordContent(record)
+      if (!content) continue
+      const ext =
+        this.config.exportFormat === 'md' ? '.md' : this.config.exportFormat === 'json' ? '.json' : '.txt'
+      this.recordList.push({
+        recordId: record.recordId,
+        path: '',
+        displayName: `记录内容${ext}`,
+        order: order++,
+        content,
+        ext
+      })
+    }
+  }
+
+  private buildLists(records: IRecord[]) {
+    this.cellList = []
+    this.recordList = []
+    this.buildCells(records)
+    this.buildRecordExports(records)
+    // 分配稳定且唯一的序号，便于并发下载时进度/日志定位
+    let i = 1
+    for (const c of this.cellList) c.order = i++
+    for (const r of this.recordList) r.order = i++
   }
 
   private buildRecordContent(record: IRecord): string {
@@ -375,27 +411,36 @@ export class AttachmentDownloader {
   }
 
   private async downloadIndividual() {
-    // 先下载附件
-    for (const cell of this.cellList) {
-      const blob = await this.fetchFile(cell)
+    const limit = Math.max(1, this.config.concurrency || 6)
+    // 并发拉取所有附件字节（网络瓶颈在此并行化），下载本身仍按顺序触发以免浏览器拦截
+    const blobs = await mapWithConcurrency(this.cellList, limit, (cell) => this.fetchFile(cell))
+
+    for (let i = 0; i < this.cellList.length; i++) {
+      const cell = this.cellList[i]
+      const blob = blobs[i]
       if (!blob) continue
       const finalName = getUniqueName(cell.displayName, '', this.usedNames)
       this.triggerDownload(blob, finalName)
-      await new Promise((r) => setTimeout(r, 200))
+      await new Promise((r) => setTimeout(r, 120))
     }
-    // 再下载记录内容
+
     for (const rec of this.recordList) {
       const blob = new Blob([rec.content], { type: 'text/plain;charset=utf-8' })
       const finalName = getUniqueName(rec.displayName, '', this.usedNames)
       this.triggerDownload(blob, finalName)
-      await new Promise((r) => setTimeout(r, 200))
+      await new Promise((r) => setTimeout(r, 120))
     }
   }
 
   private async downloadAsZip() {
+    const limit = Math.max(1, this.config.concurrency || 6)
+    // 并发拉取所有附件字节，再统一打包
+    const blobs = await mapWithConcurrency(this.cellList, limit, (cell) => this.fetchFile(cell))
+
     const zip = new JSZip()
-    for (const cell of this.cellList) {
-      const blob = await this.fetchFile(cell)
+    for (let i = 0; i < this.cellList.length; i++) {
+      const cell = this.cellList[i]
+      const blob = blobs[i]
       if (!blob) continue
       const finalName = getUniqueName(cell.displayName, cell.path, this.usedNames)
       zip.file(`${cell.path}${finalName}`, blob)
@@ -411,6 +456,37 @@ export class AttachmentDownloader {
       this.emit({ type: 'progress', index: 0, name: '打包中', size: 0, percentage: Number(metadata.percent.toFixed(1)) })
     })
     saveAs(content, `${this.zipName}.zip`)
+  }
+
+  /**
+   * 收集所有附件的「当前有效下载直链」，供外部下载工具（如 IDM）批量导入。
+   * 注意：飞书签名链接有时效，应在导出后尽快使用。
+   */
+  async collectAttachmentLinks(
+    selectedRecordIds?: string[]
+  ): Promise<{ displayName: string; url: string; recordId: string }[]> {
+    this.cellList = []
+    const records = await this.apis.fetchRecords(
+      this.config.tableId,
+      this.config.viewId,
+      selectedRecordIds
+    )
+    this.buildCells(records)
+    if (this.cellList.length === 0) return []
+
+    // 解析直链时控制并发（避免触发飞书接口限流）
+    const limit = Math.max(1, Math.min(this.config.concurrency || 6, 5))
+    await mapWithConcurrency(this.cellList, limit, async (cell) => {
+      try {
+        await this.resolveUrl(cell)
+      } catch {
+        cell.fileUrl = undefined
+      }
+    })
+
+    return this.cellList
+      .filter((c) => c.fileUrl)
+      .map((c) => ({ displayName: c.displayName, url: c.fileUrl as string, recordId: c.recordId }))
   }
 
   private triggerDownload(blob: Blob, fileName: string) {

@@ -27,6 +27,8 @@ export interface FormState {
   ignoreEmptyField: boolean
   /** 空字段处理方式：忽略 / 保留 */
   emptyFieldHandling: 'ignore' | 'keep'
+  /** 同时下载的文件并发数（越大越快，过大会触发限流） */
+  concurrency: number
   /** 下载执行方式，当前仅支持浏览器直接下载 */
   downloadExecution: 'browser'
 }
@@ -60,6 +62,7 @@ export const defaultForm: FormState = {
   keepBlankLine: false,
   ignoreEmptyField: false,
   emptyFieldHandling: 'ignore',
+  concurrency: 6,
   downloadExecution: 'browser'
 }
 

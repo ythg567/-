@@ -9,6 +9,7 @@ import {
 } from './hooks/useBitable'
 import { usePresets, FormState, defaultForm } from './hooks/usePresets'
 import { AttachmentDownloader, DownloadConfig } from './utils/download'
+import { saveAs } from 'file-saver'
 
 // Inline SVG icons (no extra dependency)
 const Icons = {
@@ -559,6 +560,7 @@ export default function App() {
       keepBlankLine: form.keepBlankLine,
       ignoreEmptyField: form.ignoreEmptyField,
       emptyFieldHandling: form.emptyFieldHandling,
+      concurrency: form.concurrency,
       downloadExecution: form.downloadExecution
     }
 
@@ -604,6 +606,82 @@ export default function App() {
     })
 
     await downloader.start(selectedRecordIds)
+  }
+
+  const handleExportLinks = async () => {
+    if (!form.tableId) {
+      await showToast('请选择数据表', 'warning')
+      return
+    }
+    if (form.attachmentFieldIds.length === 0) {
+      await showToast('请先选择附件字段', 'warning')
+      return
+    }
+
+    // 若视图中有勾选记录，则只导出所选；否则导出全部
+    let selectedRecordIds: string[] | undefined
+    const sel = await getSelectedRecordIds(form.tableId, form.viewId)
+    if (sel && sel.length > 0) selectedRecordIds = sel
+
+    const scopeText = selectedRecordIds ? `所选 ${selectedRecordIds.length} 条记录` : '全部记录'
+
+    const config: DownloadConfig = {
+      tableId: form.tableId,
+      viewId: form.viewId,
+      attachmentFieldIds: form.attachmentFieldIds,
+      fileNameType: form.fileNameType,
+      fileNameFieldIds: form.fileNameFieldIds,
+      fileNameOrderIds: form.fileNameOrderIds,
+      nameDelimiter: form.nameDelimiter,
+      downloadMode: form.downloadMode,
+      folderClassification: form.folderClassification,
+      folderLevels: form.folderLevels,
+      recordContent: false,
+      exportFormat: form.exportFormat,
+      exportFieldIds: [],
+      showFieldName: false,
+      keepBlankLine: false,
+      ignoreEmptyField: false,
+      emptyFieldHandling: 'ignore',
+      concurrency: form.concurrency,
+      downloadExecution: form.downloadExecution
+    }
+
+    try {
+      await showToast(`正在生成 ${scopeText} 的下载链接...`, 'info')
+      const downloader = new AttachmentDownloader(
+        config,
+        { fetchRecords, getCellString, getAttachmentUrl },
+        activeTable?.name || '附件下载',
+        fieldMap
+      )
+      const links = await downloader.collectAttachmentLinks(selectedRecordIds)
+
+      if (links.length === 0) {
+        await showToast('没有可导出的附件链接', 'warning')
+        return
+      }
+
+      const stamp = new Date().toISOString().slice(0, 10)
+      // 1) IDM 专用：每行一个直链（IDM 批量导入即可多线程加速）
+      const txt = links.map((l) => l.url).join('\n')
+      saveAs(new Blob([txt], { type: 'text/plain;charset=utf-8' }), `下载链接_IDM_${stamp}.txt`)
+      // 2) 明细对照：文件名 / 直链 / 记录ID（供参考，链接与上方一致）
+      const detail = links.map((l) => ({ name: l.displayName, url: l.url, recordId: l.recordId }))
+      setTimeout(() => {
+        saveAs(
+          new Blob([JSON.stringify(detail, null, 2)], { type: 'application/json' }),
+          `下载链接明细_${stamp}.json`
+        )
+      }, 300)
+
+      await showToast(
+        `已导出 ${links.length} 个下载链接（${scopeText}）。IDM 可「批量添加任务」导入 .txt；飞书直链有时效，请尽快使用`,
+        'success'
+      )
+    } catch (err: any) {
+      await showToast(`导出失败：${err?.message || '未知错误'}`, 'warning')
+    }
   }
 
   const handleCopyMemberId = async () => {
@@ -816,8 +894,19 @@ export default function App() {
                 <div className="form-row">
                   <label className="form-label">并发数</label>
                   <div className="form-control">
-                    <input type="number" min={1} max={20} defaultValue={3} disabled />
-                    <div className="hint">浏览器模式下为串行下载，避免触发限流</div>
+                    <input
+                      type="number"
+                      min={1}
+                      max={20}
+                      value={form.concurrency}
+                      onChange={(e) =>
+                        updateForm(
+                          'concurrency',
+                          Math.max(1, Math.min(20, Number(e.target.value) || 1))
+                        )
+                      }
+                    />
+                    <div className="hint">同时下载的文件数，建议 4-8；过大会触发飞书限流</div>
                   </div>
                 </div>
               </div>
@@ -1036,6 +1125,11 @@ export default function App() {
               <span className="btn-icon">{Icons.cloudDownload}</span>
             </button>
           </div>
+          <div className="footer-actions">
+            <button className="btn-secondary full" onClick={handleExportLinks} disabled={isDownloading}>
+              导出下载链接（IDM 批量加速）
+            </button>
+          </div>
         </div>
       )}
 
@@ -1125,18 +1219,23 @@ export default function App() {
                 <span>成功：{progress.completed}</span>
                 <span>失败：{progress.failed}</span>
               </div>
-              {progress.currentName && (
+              {progress.total > 0 && (
                 <div className="current-file">
                   <div className="file-name" title={progress.currentName}>
-                    {progress.currentName}
+                    {progress.currentName ? `正在处理：${progress.currentName}` : '准备中...'}
                   </div>
                   <div className="progress-bar">
                     <div
                       className="progress-fill"
-                      style={{ width: `${progress.currentPercentage}%` }}
+                      style={{
+                        width: `${progress.total ? Math.round((progress.completed / progress.total) * 100) : 0}%`
+                      }}
                     />
                   </div>
-                  <div className="progress-text">{progress.currentPercentage}%</div>
+                  <div className="progress-text">
+                    总进度 {progress.completed}/{progress.total}（
+                    {progress.total ? Math.round((progress.completed / progress.total) * 100) : 0}%）
+                  </div>
                 </div>
               )}
               <div className="log">
