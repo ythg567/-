@@ -9,6 +9,7 @@ import {
 } from './hooks/useBitable'
 import { usePresets, FormState, defaultForm } from './hooks/usePresets'
 import { AttachmentDownloader, DownloadConfig } from './utils/download'
+import { sanitizeFileName } from './utils/fileName'
 import { saveAs } from 'file-saver'
 
 // Inline SVG icons (no extra dependency)
@@ -290,9 +291,6 @@ export default function App() {
   const activeDownloaderRef = useRef<AttachmentDownloader | null>(null)
   /** 用户是否点击了取消 */
   const cancelledRef = useRef(false)
-  /** 最近一次导出的 IDM 直链文本，供「复制到剪贴板」 */
-  const [lastLinksText, setLastLinksText] = useState('')
-  const [exportDone, setExportDone] = useState(false)
 
   const [fileItems, setFileItems] = useState<Map<number, FileItem>>(new Map())
   const [totalFiles, setTotalFiles] = useState(0)
@@ -600,7 +598,8 @@ export default function App() {
       ignoreEmptyField: form.ignoreEmptyField,
       emptyFieldHandling: form.emptyFieldHandling,
       concurrency: form.concurrency,
-      downloadExecution: form.downloadExecution
+      downloadExecution: form.downloadExecution,
+      ef2BasePath: form.ef2BasePath
     }
 
     setFileItems(new Map())
@@ -613,7 +612,6 @@ export default function App() {
     setDownloadLog([])
     setIsDownloading(true)
     setProgressOpen(true)
-    setExportDone(false)
     setProgressMode('download')
     cancelledRef.current = false
 
@@ -665,21 +663,32 @@ export default function App() {
     await downloader.start(selectedRecordIds)
   }
 
-  const handleExportLinks = async () => {
+  const handleExportEf2 = async () => {
     if (!form.tableId) {
       await showToast('请选择数据表', 'warning')
+      return
+    }
+    if (!form.viewId) {
+      await showToast('请选择视图', 'warning')
       return
     }
     if (form.attachmentFieldIds.length === 0) {
       await showToast('请先选择附件字段', 'warning')
       return
     }
-    if (form.downloadMode === 'zip') {
-      await showToast(
-        'ZIP 打包无法生成单个 IDM 直链（浏览器插件没有服务器），请直接点击「下载全部记录」或使用「单独下载」模式导出 IDM 链接',
-        'warning'
-      )
-      return
+    if (form.folderClassification) {
+      if (form.folderLevels.length === 0) {
+        await showToast('开启文件夹分类后，请至少添加一个目录层级', 'warning')
+        return
+      }
+      if (form.folderLevels.some((l) => !l.fieldId)) {
+        await showToast('请为每个目录层级选择字段', 'warning')
+        return
+      }
+      if (!form.ef2BasePath.trim()) {
+        await showToast('开启文件夹分类后，请填写 ef2 本地保存路径', 'warning')
+        return
+      }
     }
 
     // 若视图中有勾选记录，则只导出所选；否则导出全部
@@ -708,7 +717,8 @@ export default function App() {
       ignoreEmptyField: false,
       emptyFieldHandling: 'ignore',
       concurrency: form.concurrency,
-      downloadExecution: form.downloadExecution
+      downloadExecution: form.downloadExecution,
+      ef2BasePath: form.ef2BasePath
     }
 
     setFileItems(new Map())
@@ -721,9 +731,7 @@ export default function App() {
     setDownloadLog([])
     setIsDownloading(true)
     setProgressOpen(true)
-    setExportDone(false)
     setProgressMode('export')
-    setLastLinksText('')
     cancelledRef.current = false
 
     const downloader = new AttachmentDownloader(
@@ -768,35 +776,34 @@ export default function App() {
     })
 
     try {
-      const links = await downloader.collectAttachmentLinks(selectedRecordIds)
+      const items = await downloader.collectEf2Items(selectedRecordIds)
 
       if (cancelledRef.current) {
         // 用户已取消，不导出文件
         return
       }
 
-      if (links.length === 0) {
+      if (items.length === 0) {
         await showToast('没有可导出的附件链接', 'warning')
         return
       }
 
       const stamp = new Date().toISOString().slice(0, 10)
-      const txt = links.map((l) => l.url).join('\n')
-      setLastLinksText(txt)
-      setExportDone(true)
-      // 1) IDM 专用：每行一个直链（IDM 批量导入即可多线程加速）
-      saveAs(new Blob([txt], { type: 'text/plain;charset=utf-8' }), `下载链接_IDM_${stamp}.txt`)
-      // 2) 明细对照：文件名 / 直链 / 记录ID（供参考，链接与上方一致）
-      const detail = links.map((l) => ({ name: l.displayName, url: l.url, recordId: l.recordId }))
-      setTimeout(() => {
-        saveAs(
-          new Blob([JSON.stringify(detail, null, 2)], { type: 'application/json' }),
-          `下载链接明细_${stamp}.json`
-        )
-      }, 300)
+      const ef2Lines = items.map((item) => {
+        const lines = [`<${item.url}`]
+        if (item.folderPath) {
+          // ef2 文件约定：路径中的反斜杠需写成双反斜杠
+          lines.push(`filepath: ${item.folderPath.replace(/\\/g, '\\\\')}`)
+        }
+        lines.push(`filename: ${sanitizeFileName(item.displayName)}`)
+        lines.push('>')
+        return lines.join('\n')
+      })
+      const ef2Content = ef2Lines.join('\n\n')
+      saveAs(new Blob([ef2Content], { type: 'text/plain;charset=utf-8' }), `IDM队列_${stamp}.ef2`)
 
       await showToast(
-        `已导出 ${links.length} 个下载链接（${scopeText}）。可「复制到剪贴板」直接粘进 IDM；飞书直链有时效，请尽快使用`,
+        `已导出 ${items.length} 个 IDM 队列条目（${scopeText}），请双击 .ef2 文件用 IDM 下载；飞书直链有时效，请尽快使用`,
         'success'
       )
     } catch (err: any) {
@@ -808,17 +815,6 @@ export default function App() {
     cancelledRef.current = true
     activeDownloaderRef.current?.cancel()
     showToast('正在取消，请稍候...', 'info')
-  }
-
-  const handleCopyLinks = async () => {
-    if (!lastLinksText) return
-    try {
-      await navigator.clipboard.writeText(lastLinksText)
-      showToast('下载链接已复制到剪贴板，可直接粘进 IDM', 'success')
-    } catch {
-      // 剪贴板不可用时，退回提示用户手动复制
-      showToast('复制失败，请改用文件方式导入 IDM', 'warning')
-    }
   }
 
   const handleCopyMemberId = async () => {
@@ -1178,11 +1174,26 @@ export default function App() {
             </div>
           </div>
 
-          {form.folderClassification && form.downloadMode === 'zip' && (
+          {form.folderClassification && (
             <div className="card">
               <div className="card-title">
                 目录层级
-                <Info tip="按字段值创建多级文件夹，仅在 ZIP 打包时生效" />
+                <Info tip="按字段值创建多级文件夹，ZIP 打包与导出 ef2 队列文件时均生效" />
+              </div>
+              <div className="form-row">
+                <label className="form-label">
+                  本地保存路径
+                  <Info tip="IDM 下载时，附件将保存到该 Windows 目录下。例如：F:\\Downloads\\飞书附件" />
+                </label>
+                <div className="form-control">
+                  <input
+                    type="text"
+                    placeholder="F:\\Downloads\\飞书附件"
+                    value={form.ef2BasePath}
+                    onChange={(e) => updateForm('ef2BasePath', e.target.value)}
+                  />
+                  <div className="hint">仅在导出 .ef2 队列文件时使用；留空则按 IDM 默认下载目录</div>
+                </div>
               </div>
               {form.folderLevels.map((level, index) => (
                 <div className="folder-level-row" key={index}>
@@ -1265,15 +1276,11 @@ export default function App() {
           <div className="footer-actions">
             <button
               className="btn-secondary full"
-              onClick={handleExportLinks}
-              disabled={isDownloading || form.downloadMode === 'zip'}
-              title={
-                form.downloadMode === 'zip'
-                  ? 'ZIP 打包无法生成单个 IDM 直链，请直接下载或使用单独下载模式'
-                  : '导出所有附件直链，供 IDM 批量加速下载'
-              }
+              onClick={handleExportEf2}
+              disabled={isDownloading}
+              title="导出 IDM ef2 队列文件，双击即可拉起 IDM 并按配置的目录层级下载"
             >
-              {form.downloadMode === 'zip' ? 'ZIP 模式不支持 IDM 导出' : '导出下载链接（IDM 批量加速）'}
+              导出 IDM 队列文件（.ef2）
             </button>
           </div>
         </div>
@@ -1339,7 +1346,7 @@ export default function App() {
             </button>
           </div>
 
-          <div className="version">当前版本 2.0.18</div>
+          <div className="version">当前版本 2.0.19</div>
         </div>
       )}
 
@@ -1352,7 +1359,7 @@ export default function App() {
         >
           <div className="modal download-modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h4>{progressMode === 'export' ? '导出下载链接' : '文件下载'}</h4>
+              <h4>{progressMode === 'export' ? '导出 IDM 队列文件（.ef2）' : '文件下载'}</h4>
               {!isDownloading && (
                 <button className="close" onClick={() => setProgressOpen(false)}>
                   {Icons.close}
@@ -1372,9 +1379,6 @@ export default function App() {
               setDetailTab={setDetailTab}
               downloadLog={downloadLog}
               onCancel={handleCancel}
-              onCopyLinks={handleCopyLinks}
-              exportDone={exportDone}
-              lastLinksText={lastLinksText}
               onClose={() => setProgressOpen(false)}
             />
           </div>
@@ -1397,9 +1401,6 @@ interface DownloadProgressBodyProps {
   setDetailTab: (tab: 'all' | 'running' | 'failed') => void
   downloadLog: string[]
   onCancel: () => void
-  onCopyLinks: () => void
-  exportDone: boolean
-  lastLinksText: string
   onClose: () => void
 }
 
@@ -1416,9 +1417,6 @@ function DownloadProgressBody({
   setDetailTab,
   downloadLog,
   onCancel,
-  onCopyLinks,
-  exportDone,
-  lastLinksText,
   onClose
 }: DownloadProgressBodyProps) {
   const items = useMemo(() => Array.from(fileItems.values()).sort((a, b) => a.index - b.index), [fileItems])
@@ -1451,8 +1449,8 @@ function DownloadProgressBody({
 
   const isAllDone = !isDownloading && !isPackaging
   const headerStatus = useMemo(() => {
-    if (isDownloading) return { text: progressMode === 'export' ? '获取链接中...' : '下载中...', color: 'blue' }
-    if (failedCount > 0 && completedCount === 0) return { text: '下载失败', color: 'red' }
+    if (isDownloading) return { text: progressMode === 'export' ? '生成 ef2 队列中...' : '下载中...', color: 'blue' }
+    if (failedCount > 0 && completedCount === 0) return { text: '失败', color: 'red' }
     if (failedCount > 0) return { text: '部分完成', color: 'orange' }
     return { text: progressMode === 'export' ? '导出成功' : '下载成功', color: 'green' }
   }, [isDownloading, completedCount, failedCount, progressMode])
@@ -1591,11 +1589,6 @@ function DownloadProgressBody({
         {isDownloading && (
           <button className="btn-secondary" onClick={onCancel}>
             取消
-          </button>
-        )}
-        {exportDone && lastLinksText && !isDownloading && (
-          <button className="btn-secondary" onClick={onCopyLinks}>
-            复制到剪贴板
           </button>
         )}
         {isAllDone && (

@@ -37,6 +37,8 @@ export interface DownloadConfig {
   concurrency: number
   /** 下载执行方式，当前仅支持浏览器直接下载 */
   downloadExecution: 'browser'
+  /** 导出 ef2 队列文件时，IDM 保存附件的基础本地路径 */
+  ef2BasePath: string
 }
 
 export interface AttachmentItem {
@@ -533,12 +535,12 @@ export class AttachmentDownloader {
   }
 
   /**
-   * 收集所有附件的「当前有效下载直链」，供外部下载工具（如 IDM）批量导入。
+   * 收集所有附件的「当前有效下载直链 + 本地目录层级」，供生成 IDM ef2 队列文件。
    * 注意：飞书签名链接有时效，应在导出后尽快使用。
    */
-  async collectAttachmentLinks(
+  async collectEf2Items(
     selectedRecordIds?: string[]
-  ): Promise<{ displayName: string; url: string; recordId: string }[]> {
+  ): Promise<{ displayName: string; url: string; recordId: string; folderPath: string }[]> {
     this.cellList = []
     const records = await this.apis.fetchRecords(
       this.config.tableId,
@@ -552,13 +554,27 @@ export class AttachmentDownloader {
     this.buildCells(records)
     if (this.cellList.length === 0) return []
 
+    // 先按用户配置的字段命名规则生成文件名
+    await this.applyFileNames()
+
+    // 预计算每条记录对应的 ef2 本地文件夹路径
+    const ef2FolderPathMap = new Map<string, string>()
+    if (this.config.folderClassification && this.config.folderLevels.length > 0) {
+      const recordIds = Array.from(new Set(this.cellList.map((c) => c.recordId)))
+      await Promise.all(
+        recordIds.map(async (recordId) => {
+          const path = await this.buildEf2FolderPath(recordId)
+          ef2FolderPathMap.set(recordId, path)
+        })
+      )
+    }
+
     const linkTotalBytes = this.cellList.reduce((sum, c) => sum + (c.size || 0), 0)
     this.emit({ type: 'pending', total: this.cellList.length, totalBytes: linkTotalBytes })
     this.emit({ type: 'info', message: `正在获取 ${this.cellList.length} 个附件的下载直链...` })
 
     // 解析直链时控制并发（避免触发飞书接口限流）
     const limit = Math.max(1, Math.min(this.config.concurrency || 6, 5))
-    let done = 0
     await mapWithConcurrency(this.cellList, limit, async (cell) => {
       if (this.isCancelled()) {
         this.emitFileProgress(cell.order, cell.displayName, cell.size, 0, 'cancelled', '已取消')
@@ -573,7 +589,6 @@ export class AttachmentDownloader {
         this.emitFileProgress(cell.order, cell.displayName, cell.size, 0, 'failed', err?.message || '获取链接失败')
         this.emit({ type: 'error', index: cell.order, message: err?.message || '获取链接失败' })
       }
-      done++
     })
 
     if (this.isCancelled()) {
@@ -583,7 +598,31 @@ export class AttachmentDownloader {
 
     return this.cellList
       .filter((c) => c.fileUrl)
-      .map((c) => ({ displayName: c.displayName, url: c.fileUrl as string, recordId: c.recordId }))
+      .map((c) => ({
+        displayName: c.displayName,
+        url: c.fileUrl as string,
+        recordId: c.recordId,
+        folderPath: ef2FolderPathMap.get(c.recordId) || ''
+      }))
+  }
+
+  /**
+   * 根据 folderLevels 配置，为指定记录生成 ef2 用的 Windows 本地文件夹路径。
+   * 已包含 ef2BasePath 前缀，末尾带反斜杠；如未开启文件夹分类则返回空字符串。
+   */
+  private async buildEf2FolderPath(recordId: string): Promise<string> {
+    if (!this.config.folderClassification || !this.config.folderLevels?.length) return ''
+    const parts: string[] = []
+    for (const level of this.config.folderLevels) {
+      if (!level.fieldId) continue
+      const raw = await this.apis.getCellString(this.config.tableId, level.fieldId, recordId)
+      const folder = getFolderName(raw)
+      if (folder) parts.push(folder)
+    }
+    if (parts.length === 0) return ''
+    const base = (this.config.ef2BasePath || '').trim().replace(/\\+$/, '')
+    const joined = base ? [base, ...parts].join('\\') : parts.join('\\')
+    return `${joined}\\`
   }
 
   private triggerDownload(blob: Blob, fileName: string) {

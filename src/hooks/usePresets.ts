@@ -27,6 +27,8 @@ export interface FormState {
   ignoreEmptyField: boolean
   /** 空字段处理方式：忽略 / 保留 */
   emptyFieldHandling: 'ignore' | 'keep'
+  /** 导出 ef2 队列文件时，IDM 保存附件的基础本地路径（Windows 路径） */
+  ef2BasePath: string
   /** 同时下载的文件并发数（越大越快，过大会触发限流） */
   concurrency: number
   /** 下载执行方式，当前仅支持浏览器直接下载 */
@@ -55,6 +57,7 @@ export const defaultForm: FormState = {
   downloadMode: 'zip',
   folderClassification: false,
   folderLevels: [],
+  ef2BasePath: '',
   recordContent: false,
   exportFormat: 'txt',
   exportFieldIds: [],
