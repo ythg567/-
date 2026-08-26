@@ -268,6 +268,8 @@ export default function App() {
   /** 最近一次导出的 IDM 直链文本，供「复制到剪贴板」 */
   const [lastLinksText, setLastLinksText] = useState('')
   const [exportDone, setExportDone] = useState(false)
+  /** 弹窗标题：下载进度 / 导出下载链接 */
+  const [progressMode, setProgressMode] = useState<'download' | 'export'>('download')
   /** 用户是否点击了取消 */
   const cancelledRef = useRef(false)
 
@@ -576,6 +578,7 @@ export default function App() {
     setIsDownloading(true)
     setProgressOpen(true)
     setExportDone(false)
+    setProgressMode('download')
     cancelledRef.current = false
 
     const downloader = new AttachmentDownloader(
@@ -631,6 +634,13 @@ export default function App() {
       await showToast('请先选择附件字段', 'warning')
       return
     }
+    if (form.downloadMode === 'zip') {
+      await showToast(
+        'ZIP 打包无法生成单个 IDM 直链（浏览器插件没有服务器），请直接点击「下载全部记录」或使用「单独下载」模式导出 IDM 链接',
+        'warning'
+      )
+      return
+    }
 
     // 若视图中有勾选记录，则只导出所选；否则导出全部
     let selectedRecordIds: string[] | undefined
@@ -666,6 +676,7 @@ export default function App() {
     setIsDownloading(true)
     setProgressOpen(true)
     setExportDone(false)
+    setProgressMode('export')
     setLastLinksText('')
     cancelledRef.current = false
 
@@ -1206,8 +1217,17 @@ export default function App() {
             </button>
           </div>
           <div className="footer-actions">
-            <button className="btn-secondary full" onClick={handleExportLinks} disabled={isDownloading}>
-              导出下载链接（IDM 批量加速）
+            <button
+              className="btn-secondary full"
+              onClick={handleExportLinks}
+              disabled={isDownloading || form.downloadMode === 'zip'}
+              title={
+                form.downloadMode === 'zip'
+                  ? 'ZIP 打包无法生成单个 IDM 直链，请直接下载或使用单独下载模式'
+                  : '导出所有附件直链，供 IDM 批量加速下载'
+              }
+            >
+              {form.downloadMode === 'zip' ? 'ZIP 模式不支持 IDM 导出' : '导出下载链接（IDM 批量加速）'}
             </button>
           </div>
         </div>
@@ -1286,7 +1306,7 @@ export default function App() {
         >
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h4>下载进度</h4>
+              <h4>{progressMode === 'export' ? '导出下载链接' : '下载进度'}</h4>
               {!isDownloading && (
                 <button className="close" onClick={() => setProgressOpen(false)}>
                   {Icons.close}
