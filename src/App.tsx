@@ -790,16 +790,18 @@ export default function App() {
 
       const stamp = new Date().toISOString().slice(0, 10)
       const ef2Lines = items.map((item) => {
-        const lines = [`<${item.url}`]
+        // ef2 文件格式约定：< 单独一行，URL 在下一行，字段行随后，> 单独一行
+        // 参考 https://github.com/MotooriKashin/ef2
+        const lines = ['<', item.url]
         if (item.folderPath) {
-          // ef2 文件约定：路径中的反斜杠需写成双反斜杠
-          lines.push(`filepath: ${item.folderPath.replace(/\\/g, '\\\\')}`)
+          // filepath 使用 Windows 单反斜杠路径，如 F:\Dir\Sub\
+          lines.push(`filepath: ${item.folderPath}`)
         }
         lines.push(`filename: ${sanitizeFileName(item.displayName)}`)
         lines.push('>')
         return lines.join('\n')
       })
-      const ef2Content = ef2Lines.join('\n\n')
+      const ef2Content = ef2Lines.join('\n')
       saveAs(new Blob([ef2Content], { type: 'text/plain;charset=utf-8' }), `IDM队列_${stamp}.ef2`)
 
       await showToast(
