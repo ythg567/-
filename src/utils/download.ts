@@ -593,8 +593,11 @@ export class AttachmentDownloader {
 
     if (this.isCancelled()) {
       this.emit({ type: 'cancelled', partialSaved: false })
+      this.emit({ type: 'finished' })
       return []
     }
+
+    this.emit({ type: 'finished' })
 
     return this.cellList
       .filter((c) => c.fileUrl)

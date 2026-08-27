@@ -766,6 +766,8 @@ export default function App() {
           break
         case 'cancelled':
           setDownloadLog((l) => [...l, '已取消'])
+          setIsDownloading(false)
+          setIsPackaging(false)
           break
         case 'finished':
           setIsDownloading(false)
@@ -789,6 +791,8 @@ export default function App() {
       }
 
       const stamp = new Date().toISOString().slice(0, 10)
+      // 按「本地保存目录」分组去重文件名：同一目录下出现重名时，后续文件自动加 -1、-2（插入扩展名前）
+      const usedNamesByFolder = new Map<string, Set<string>>()
       const ef2Lines = items.map((item) => {
         // ef2 文件格式约定：< 单独一行，URL 在下一行，字段行随后，> 单独一行
         // 参考 https://github.com/MotooriKashin/ef2
@@ -797,7 +801,25 @@ export default function App() {
           // filepath 使用 Windows 单反斜杠路径，如 F:\Dir\Sub\
           lines.push(`filepath: ${item.folderPath}`)
         }
-        lines.push(`filename: ${sanitizeFileName(item.displayName)}`)
+        let fileName = sanitizeFileName(item.displayName)
+        if (!fileName) fileName = 'attachment'
+        const folder = item.folderPath || ''
+        const usedSet = usedNamesByFolder.get(folder) || new Set<string>()
+        if (usedSet.has(fileName)) {
+          const dot = fileName.lastIndexOf('.')
+          const namePart = dot > 0 ? fileName.slice(0, dot) : fileName
+          const extPart = dot > 0 ? fileName.slice(dot) : ''
+          let idx = 1
+          let candidate = `${namePart}-${idx}${extPart}`
+          while (usedSet.has(candidate)) {
+            idx += 1
+            candidate = `${namePart}-${idx}${extPart}`
+          }
+          fileName = candidate
+        }
+        usedSet.add(fileName)
+        usedNamesByFolder.set(folder, usedSet)
+        lines.push(`filename: ${fileName}`)
         lines.push('>')
         return lines.join('\n')
       })
@@ -805,7 +827,7 @@ export default function App() {
       saveAs(new Blob([ef2Content], { type: 'text/plain;charset=utf-8' }), `IDM队列_${stamp}.ef2`)
 
       await showToast(
-        `已导出 ${items.length} 个 IDM 队列条目（${scopeText}），请双击 .ef2 文件用 IDM 下载；飞书直链有时效，请尽快使用`,
+        `已导出 ${items.length} 个 IDM 队列条目（${scopeText}），同目录重名已自动加 -1/-2 序号；请双击 .ef2 文件用 IDM 下载，飞书直链有时效请尽快使用`,
         'success'
       )
     } catch (err: any) {
@@ -1348,7 +1370,7 @@ export default function App() {
             </button>
           </div>
 
-          <div className="version">当前版本 2.0.19</div>
+          <div className="version">当前版本 2.0.20</div>
         </div>
       )}
 
@@ -1436,9 +1458,14 @@ function DownloadProgressBody({
   }, [items])
 
   const overallPercent = useMemo(() => {
+    if (progressMode === 'export') {
+      // 导出 ef2 不下载字节，进度按「已解析直链条数 / 总数」估算
+      if (totalFiles <= 0) return 0
+      return Math.min(100, Math.round((completedCount / totalFiles) * 100))
+    }
     if (totalBytes <= 0) return 0
     return Math.min(100, Math.round((loadedBytes / totalBytes) * 100))
-  }, [loadedBytes, totalBytes])
+  }, [loadedBytes, totalBytes, completedCount, totalFiles, progressMode])
 
   const { speedText, etaText } = useMemo(() => {
     if (!startTime || loadedBytes <= 0) return { speedText: '--', etaText: '--' }
