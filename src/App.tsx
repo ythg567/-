@@ -5,7 +5,8 @@ import {
   IViewMeta,
   isAttachmentField,
   SUPPORT_TEXT_TYPES,
-  FieldType
+  FieldType,
+  sortByOrder
 } from './hooks/useBitable'
 import { usePresets, FormState, defaultForm } from './hooks/usePresets'
 import { AttachmentDownloader, DownloadConfig } from './utils/download'
@@ -292,6 +293,18 @@ export default function App() {
   /** 用户是否点击了取消 */
   const cancelledRef = useRef(false)
 
+  // ef2 导出「确认预览」弹窗相关状态
+  const [previewOpen, setPreviewOpen] = useState(false)
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const [previewData, setPreviewData] = useState<{
+    totalRecords: number
+    totalFiles: number
+    duplicateWarnings: number
+    preview: { folder: string; files: string[] }[]
+  } | null>(null)
+  const previewDownloaderRef = useRef<AttachmentDownloader | null>(null)
+  const previewCtxRef = useRef<{ selectedRecordIds?: string[]; scopeText: string }>({ scopeText: '' })
+
   const [fileItems, setFileItems] = useState<Map<number, FileItem>>(new Map())
   const [totalFiles, setTotalFiles] = useState(0)
   const [totalBytes, setTotalBytes] = useState(0)
@@ -329,7 +342,16 @@ export default function App() {
   )
 
   const views = useMemo<IViewMeta[]>(() => activeTable?.viewMetaList || [], [activeTable])
-  const fields = useMemo<IFieldMeta[]>(() => activeTable?.fieldMetaList || [], [activeTable])
+  // 按当前视图的字段列显示顺序排序下拉框选项（保持一致于表格列顺序）
+  const viewFieldOrder = useMemo<string[] | null>(
+    () => (form.viewId ? (activeTable?.viewFieldOrders?.[form.viewId] as string[] | undefined) || null : null),
+    [activeTable, form.viewId]
+  )
+  const fields = useMemo<IFieldMeta[]>(() => {
+    const list = activeTable?.fieldMetaList || []
+    if (!viewFieldOrder || viewFieldOrder.length === 0) return list
+    return sortByOrder(list, viewFieldOrder.map((id) => ({ id })))
+  }, [activeTable, viewFieldOrder])
   const fieldMap = useMemo(() => {
     const map = new Map<string, string>()
     for (const f of fields) map.set(f.id, f.name)
@@ -721,6 +743,44 @@ export default function App() {
       ef2BasePath: form.ef2BasePath
     }
 
+    const downloader = new AttachmentDownloader(
+      config,
+      { fetchRecords, getCellString, getAttachmentUrl },
+      activeTable?.name || '附件下载',
+      fieldMap
+    )
+    previewDownloaderRef.current = downloader
+    previewCtxRef.current = { selectedRecordIds, scopeText }
+
+    // 打开「确认导出」预览弹窗，并计算目录树结构（不取直链、不下载）
+    setPreviewLoading(true)
+    setPreviewData(null)
+    setPreviewOpen(true)
+    try {
+      const data = await downloader.previewEf2Structure(selectedRecordIds)
+      setPreviewData(data)
+    } catch (err: any) {
+      await showToast(`预览失败：${err?.message || '未知错误'}`, 'warning')
+      setPreviewOpen(false)
+    } finally {
+      setPreviewLoading(false)
+    }
+  }
+
+  const handleConfirmEf2Export = () => {
+    const downloader = previewDownloaderRef.current
+    const { selectedRecordIds, scopeText } = previewCtxRef.current
+    setPreviewOpen(false)
+    if (!downloader) return
+    runEf2Export(downloader, selectedRecordIds, scopeText)
+  }
+
+  // 真正执行 ef2 导出（解析直链 + 生成 .ef2 文件），由「确认导出」按钮触发
+  const runEf2Export = async (
+    downloader: AttachmentDownloader,
+    selectedRecordIds: string[] | undefined,
+    scopeText: string
+  ) => {
     setFileItems(new Map())
     setTotalFiles(0)
     setTotalBytes(0)
@@ -734,12 +794,6 @@ export default function App() {
     setProgressMode('export')
     cancelledRef.current = false
 
-    const downloader = new AttachmentDownloader(
-      config,
-      { fetchRecords, getCellString, getAttachmentUrl },
-      activeTable?.name || '附件下载',
-      fieldMap
-    )
     activeDownloaderRef.current = downloader
 
     downloader.on((event) => {
@@ -1370,7 +1424,7 @@ export default function App() {
             </button>
           </div>
 
-          <div className="version">当前版本 2.0.20</div>
+          <div className="version">当前版本 2.0.21</div>
         </div>
       )}
 
@@ -1405,6 +1459,82 @@ export default function App() {
               onCancel={handleCancel}
               onClose={() => setProgressOpen(false)}
             />
+          </div>
+        </div>
+      )}
+
+      {previewOpen && (
+        <div className="modal-overlay" onClick={() => !previewLoading && setPreviewOpen(false)}>
+          <div className="modal preview-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h4>确认导出 IDM 队列文件</h4>
+              {!previewLoading && (
+                <button className="close" onClick={() => setPreviewOpen(false)}>
+                  {Icons.close}
+                </button>
+              )}
+            </div>
+
+            <div className="preview-body">
+              {previewLoading ? (
+                <div className="preview-loading">
+                  <div className="spinner" />
+                  <p>正在计算目录结构...</p>
+                </div>
+              ) : previewData ? (
+                <>
+                  <div className="preview-stats">
+                    <div className="stat">
+                      <div className="stat-num">{previewData.totalRecords}</div>
+                      <div className="stat-label">记录数</div>
+                    </div>
+                    <div className="stat">
+                      <div className="stat-num">{previewData.totalFiles}</div>
+                      <div className="stat-label">预计文件数</div>
+                    </div>
+                    <div className="stat">
+                      <div className={`stat-num ${previewData.duplicateWarnings > 0 ? 'warn' : ''}`}>
+                        {previewData.duplicateWarnings}
+                      </div>
+                      <div className="stat-label">重名将自动加序号</div>
+                    </div>
+                  </div>
+
+                  <div className="preview-tree-title">目录结构预览（前 {previewData.preview.length} 条记录）</div>
+                  <div className="preview-tree">
+                    {previewData.preview.map((p, i) => (
+                      <div className="tree-folder" key={i}>
+                        <div className="tree-folder-path">{p.folder}</div>
+                        <ul className="tree-files">
+                          {p.files.map((f, j) => (
+                            <li key={j}>{f}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    ))}
+                  </div>
+
+                  <p className="preview-note">
+                    飞书附件直链有时效（几十分钟~1 小时），导出 .ef2 后请尽快双击用 IDM 下载；落盘路径即上方预览中的目录。
+                  </p>
+                </>
+              ) : (
+                <p>暂无可预览的内容。</p>
+              )}
+            </div>
+
+            <div className="modal-footer">
+              <button className="btn-secondary" onClick={() => setPreviewOpen(false)} disabled={previewLoading}>
+                取消
+              </button>
+              <button
+                className="btn-primary"
+                onClick={handleConfirmEf2Export}
+                disabled={previewLoading || !previewData || previewData.totalFiles === 0}
+              >
+                确认导出
+              </button>
+            </div>
           </div>
         </div>
       )}

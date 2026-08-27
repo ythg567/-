@@ -610,6 +610,84 @@ export class AttachmentDownloader {
   }
 
   /**
+   * 预览 ef2 导出结构（不取直链、不下载），用于「确认导出」弹窗。
+   * 统计记录数 / 预计文件数 / 同目录重名条数，并返回前 limit 条记录的目录树。
+   */
+  async previewEf2Structure(
+    selectedRecordIds?: string[],
+    detailLimit = 5
+  ): Promise<{
+    totalRecords: number
+    totalFiles: number
+    duplicateWarnings: number
+    preview: { folder: string; files: string[] }[]
+  }> {
+    this.cellList = []
+    const records = await this.apis.fetchRecords(
+      this.config.tableId,
+      this.config.viewId,
+      selectedRecordIds
+    )
+    const totalRecords = records.length
+    this.buildCells(records)
+    if (this.cellList.length === 0) {
+      return { totalRecords, totalFiles: 0, duplicateWarnings: 0, preview: [] }
+    }
+
+    // 复用命名与目录层级逻辑（与正式导出一致，但不解析 URL）
+    await this.applyFileNames()
+
+    const ef2FolderPathMap = new Map<string, string>()
+    if (this.config.folderClassification && this.config.folderLevels.length > 0) {
+      const recordIds = Array.from(new Set(this.cellList.map((c) => c.recordId)))
+      await Promise.all(
+        recordIds.map(async (recordId) => {
+          ef2FolderPathMap.set(recordId, await this.buildEf2FolderPath(recordId))
+        })
+      )
+    }
+
+    // 计算最终文件名（含同目录去重 -1/-2），与正式导出逻辑一致
+    const usedNamesByFolder = new Map<string, Set<string>>()
+    const finalNames = new Map<AttachmentItem, string>()
+    let duplicateWarnings = 0
+    for (const cell of this.cellList) {
+      let fileName = cell.displayName
+      if (!fileName) fileName = 'attachment'
+      const folder = ef2FolderPathMap.get(cell.recordId) || ''
+      const usedSet = usedNamesByFolder.get(folder) || new Set<string>()
+      if (usedSet.has(fileName)) {
+        const dot = fileName.lastIndexOf('.')
+        const namePart = dot > 0 ? fileName.slice(0, dot) : fileName
+        const extPart = dot > 0 ? fileName.slice(dot) : ''
+        let idx = 1
+        let candidate = `${namePart}-${idx}${extPart}`
+        while (usedSet.has(candidate)) {
+          idx += 1
+          candidate = `${namePart}-${idx}${extPart}`
+        }
+        fileName = candidate
+        duplicateWarnings += 1
+      }
+      usedSet.add(fileName)
+      usedNamesByFolder.set(folder, usedSet)
+      finalNames.set(cell, fileName)
+    }
+
+    // 仅取前 detailLimit 条记录做目录树预览
+    const recordIdsForPreview = Array.from(new Set(this.cellList.map((c) => c.recordId))).slice(0, detailLimit)
+    const preview = recordIdsForPreview.map((recordId) => {
+      const folder = ef2FolderPathMap.get(recordId) || '(保存到 IDM 默认目录)'
+      const files = this.cellList
+        .filter((c) => c.recordId === recordId)
+        .map((c) => finalNames.get(c) || c.displayName)
+      return { folder, files }
+    })
+
+    return { totalRecords, totalFiles: this.cellList.length, duplicateWarnings, preview }
+  }
+
+  /**
    * 根据 folderLevels 配置，为指定记录生成 ef2 用的 Windows 本地文件夹路径。
    * 已包含 ef2BasePath 前缀，末尾带反斜杠；如未开启文件夹分类则返回空字符串。
    */

@@ -21,6 +21,8 @@ export interface ITableInfo {
   table: any
   fieldMetaList: IFieldMeta[]
   viewMetaList: IViewMeta[]
+  /** 每个视图对应的「字段列显示顺序」（视图字段列表为有序），用于下拉框按表格列顺序展示 */
+  viewFieldOrders: Record<string, string[]>
 }
 
 export interface IAttachmentFile {
@@ -87,12 +89,24 @@ export function useBitable() {
           const table = await bitable.base.getTableById(meta.id)
           const fieldMetaList = await table.getFieldMetaList()
           const viewMetaList = await table.getViewMetaList()
+          // 拉取每个视图的字段列显示顺序（视图字段列表为有序），用于下拉框排序
+          const viewFieldOrders: Record<string, string[]> = {}
+          for (const v of viewMetaList) {
+            try {
+              const view = await table.getViewById(v.id)
+              const vFields = (await view.getFieldMetaList()) || []
+              viewFieldOrders[v.id] = vFields.map((f: any) => f.id)
+            } catch {
+              viewFieldOrders[v.id] = []
+            }
+          }
           infos.push({
             id: meta.id,
             name: meta.name,
             table,
             fieldMetaList,
-            viewMetaList
+            viewMetaList,
+            viewFieldOrders
           })
         }
 

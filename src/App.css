@@ -1460,3 +1460,114 @@ input:disabled {
 .download-modal-footer .btn-primary:hover {
   background: #245bdb;
 }
+
+/* ===== 确认导出预览弹窗 ===== */
+.preview-modal {
+  max-width: 520px;
+  width: 92%;
+}
+
+.preview-body {
+  padding: 16px 18px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.preview-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 24px 0;
+  color: #646a73;
+}
+
+.preview-stats {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.preview-stats .stat {
+  flex: 1;
+  background: #f5f6f7;
+  border-radius: 8px;
+  padding: 10px 8px;
+  text-align: center;
+}
+
+.preview-stats .stat-num {
+  font-size: 22px;
+  font-weight: 700;
+  color: #1f2329;
+  line-height: 1.2;
+}
+
+.preview-stats .stat-num.warn {
+  color: #ff8800;
+}
+
+.preview-stats .stat-label {
+  font-size: 12px;
+  color: #8f959e;
+  margin-top: 2px;
+}
+
+.preview-tree-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1f2329;
+  margin-bottom: 8px;
+}
+
+.preview-tree {
+  border: 1px solid #e5e6eb;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #fafbfc;
+}
+
+.tree-folder {
+  margin-bottom: 10px;
+}
+
+.tree-folder:last-child {
+  margin-bottom: 0;
+}
+
+.tree-folder-path {
+  font-family: 'Consolas', 'Menlo', monospace;
+  font-size: 12px;
+  color: #3370ff;
+  word-break: break-all;
+  background: #eef2ff;
+  border-radius: 4px;
+  padding: 3px 6px;
+  margin-bottom: 4px;
+}
+
+.tree-files {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 14px;
+}
+
+.tree-files li {
+  font-size: 12px;
+  color: #4e5969;
+  font-family: 'Consolas', 'Menlo', monospace;
+  padding: 2px 0;
+  word-break: break-all;
+}
+
+.tree-files li::before {
+  content: '├─ ';
+  color: #c9cdd4;
+}
+
+.preview-note {
+  font-size: 12px;
+  color: #8f959e;
+  margin: 12px 0 0;
+  line-height: 1.5;
+}
