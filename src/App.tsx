@@ -305,6 +305,109 @@ export default function App() {
   const previewDownloaderRef = useRef<AttachmentDownloader | null>(null)
   const previewCtxRef = useRef<{ selectedRecordIds?: string[]; scopeText: string }>({ scopeText: '' })
 
+  // ===== 管理员入口 & 全局关闭开关（kill switch）=====
+  const [adminLoginOpen, setAdminLoginOpen] = useState(false)
+  const [adminPanelOpen, setAdminPanelOpen] = useState(false)
+  const [adminAccount, setAdminAccount] = useState('')
+  const [adminPassword, setAdminPassword] = useState('')
+  const [adminError, setAdminError] = useState('')
+  const [pluginDisabled, setPluginDisabled] = useState(false)
+  const [killBusy, setKillBusy] = useState(false)
+  const [ghToken, setGhToken] = useState<string>(() => {
+    try {
+      return localStorage.getItem('feishu_kill_token') || ''
+    } catch {
+      return ''
+    }
+  })
+  const [tokenInput, setTokenInput] = useState('')
+  const versionClicks = useRef(0)
+
+  // 启动时拉取 kill.json：若被管理员全局关闭，则锁定界面
+  useEffect(() => {
+    let alive = true
+    fetch('kill.json', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (alive && d && d.disabled) setPluginDisabled(true)
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  const handleVersionClick = () => {
+    versionClicks.current += 1
+    if (versionClicks.current >= 5) {
+      versionClicks.current = 0
+      setAdminLoginOpen(true)
+    }
+  }
+
+  const handleAdminLogin = () => {
+    if (adminAccount.trim() === 'ythg' && adminPassword === '2510944517') {
+      setAdminError('')
+      setAdminLoginOpen(false)
+      setAdminPanelOpen(true)
+    } else {
+      setAdminError('账号或密码错误')
+    }
+  }
+
+  // 通过 GitHub API 更新 gh-pages 上的 kill.json，实现「所有实例」统一关闭/启用
+  const updateKillFile = async (disabled: boolean) => {
+    const token = tokenInput.trim() || ghToken
+    if (!token) {
+      await showToast('请先在管理面板填入 GitHub Token（用于写入 kill.json 实现全局开关）', 'warning')
+      return
+    }
+    setKillBusy(true)
+    try {
+      const repo = 'ythg567/-'
+      const apiBase = `https://api.github.com/repos/${repo}/contents/kill.json`
+      const getRes = await fetch(`${apiBase}?ref=gh-pages`, {
+        headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' }
+      })
+      if (!getRes.ok) throw new Error('读取 kill.json 失败: ' + getRes.status)
+      const getData = await getRes.json()
+      const content = btoa(unescape(encodeURIComponent(JSON.stringify({ disabled, updatedAt: Date.now() }))))
+      const putRes = await fetch(apiBase, {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/vnd.github+json',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          message: disabled ? 'disable plugin' : 'enable plugin',
+          content,
+          sha: getData.sha
+        })
+      })
+      if (!putRes.ok) throw new Error('写入 kill.json 失败: ' + putRes.status)
+      try {
+        localStorage.setItem('feishu_kill_token', token)
+      } catch {
+        /* ignore */
+      }
+      setGhToken(token)
+      setPluginDisabled(disabled)
+      await showToast(
+        disabled ? '插件已全局关闭，所有实例将不可用' : '插件已重新启用',
+        'success'
+      )
+      setAdminPanelOpen(false)
+    } catch (e: any) {
+      await showToast(
+        '操作失败：' + (e?.message || '未知错误') + '（也可仅本地关闭，不影响其他设备）',
+        'warning'
+      )
+    } finally {
+      setKillBusy(false)
+    }
+  }
+
   const [fileItems, setFileItems] = useState<Map<number, FileItem>>(new Map())
   const [totalFiles, setTotalFiles] = useState(0)
   const [totalBytes, setTotalBytes] = useState(0)
@@ -1424,7 +1527,9 @@ export default function App() {
             </button>
           </div>
 
-          <div className="version">当前版本 2.0.21</div>
+          <div className="version" onClick={handleVersionClick} title="" style={{ cursor: 'pointer' }}>
+            当前版本 2.0.22
+          </div>
         </div>
       )}
 
@@ -1534,6 +1639,110 @@ export default function App() {
               >
                 确认导出
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 全局关闭锁定遮罩：被管理员关闭后所有实例显示，但仍可管理员登录恢复 */}
+      {pluginDisabled && (
+        <div className="modal-overlay">
+          <div className="modal kill-lock">
+            <h4>插件已停用</h4>
+            <p>该插件已被管理员全局关闭，暂时无法使用。</p>
+            <button type="button" className="btn-secondary" onClick={() => setAdminLoginOpen(true)}>
+              管理员登录
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 管理员登录弹窗（隐蔽入口：连点版本号 5 次） */}
+      {adminLoginOpen && (
+        <div className="modal-overlay" onClick={() => setAdminLoginOpen(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h4>管理员登录</h4>
+              <button className="close" onClick={() => setAdminLoginOpen(false)}>
+                ×
+              </button>
+            </div>
+            <div className="modal-body">
+              <div className="form-group">
+                <label>账号</label>
+                <input
+                  value={adminAccount}
+                  onChange={(e) => setAdminAccount(e.target.value)}
+                  placeholder="请输入管理员账号"
+                />
+              </div>
+              <div className="form-group">
+                <label>密码</label>
+                <input
+                  type="password"
+                  value={adminPassword}
+                  onChange={(e) => setAdminPassword(e.target.value)}
+                  placeholder="请输入密码"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleAdminLogin()
+                  }}
+                />
+              </div>
+              {adminError && <div className="form-error">{adminError}</div>}
+            </div>
+            <div className="modal-footer">
+              <button className="btn-secondary" onClick={() => setAdminLoginOpen(false)}>
+                取消
+              </button>
+              <button className="btn-primary" onClick={handleAdminLogin}>
+                登录
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 管理面板：全局关闭 / 启用 */}
+      {adminPanelOpen && (
+        <div className="modal-overlay" onClick={() => setAdminPanelOpen(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h4>管理面板</h4>
+              <button className="close" onClick={() => setAdminPanelOpen(false)}>
+                ×
+              </button>
+            </div>
+            <div className="modal-body">
+              <p>
+                当前状态：
+                <strong className={pluginDisabled ? 'text-red' : 'text-green'}>
+                  {pluginDisabled ? '已全局关闭' : '正常'}
+                </strong>
+              </p>
+              <div className="form-group">
+                <label>GitHub Token（用于写入 kill.json 实现全局开关，仅本地保存）</label>
+                <input
+                  type="password"
+                  value={tokenInput}
+                  onChange={(e) => setTokenInput(e.target.value)}
+                  placeholder={ghToken ? '已保存，留空则沿用' : '粘贴具有仓库写权限的 Token'}
+                />
+              </div>
+              <p className="hint">全局关闭会更新线上 kill.json，所有加载该插件的实例将立即不可用；启用后恢复。</p>
+            </div>
+            <div className="modal-footer">
+              <button className="btn-secondary" onClick={() => setAdminPanelOpen(false)}>
+                关闭
+              </button>
+              {pluginDisabled ? (
+                <button className="btn-primary" disabled={killBusy} onClick={() => updateKillFile(false)}>
+                  启用插件
+                </button>
+              ) : (
+                <button className="btn-danger" disabled={killBusy} onClick={() => updateKillFile(true)}>
+                  {killBusy ? '处理中...' : '关闭插件'}
+                </button>
+              )}
             </div>
           </div>
         </div>

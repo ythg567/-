@@ -141,6 +141,8 @@ export class AttachmentDownloader {
   private fieldMap: Map<string, string> = new Map()
   /** 取消标志：cancel() 后所有正在进行的任务应尽快停止 */
   private cancelled = false
+  /** 预览阶段已拉取的记录缓存，导出阶段直接复用，避免重复请求飞书接口拖慢速度 */
+  private recordsCache?: { key: string; records: any[] }
 
   constructor(config: DownloadConfig, apis: BitableApis, zipName: string, fieldMap?: Map<string, string>) {
     this.config = config
@@ -542,11 +544,18 @@ export class AttachmentDownloader {
     selectedRecordIds?: string[]
   ): Promise<{ displayName: string; url: string; recordId: string; folderPath: string }[]> {
     this.cellList = []
-    const records = await this.apis.fetchRecords(
-      this.config.tableId,
-      this.config.viewId,
-      selectedRecordIds
-    )
+    // 复用预览阶段已拉取的记录（key 一致才复用），省去一次飞书接口往返
+    const cacheKey = JSON.stringify(selectedRecordIds ?? [])
+    let records: any[]
+    if (this.recordsCache && this.recordsCache.key === cacheKey) {
+      records = this.recordsCache.records
+    } else {
+      records = await this.apis.fetchRecords(
+        this.config.tableId,
+        this.config.viewId,
+        selectedRecordIds
+      )
+    }
     if (this.isCancelled()) {
       this.emit({ type: 'cancelled', partialSaved: false })
       return []
@@ -573,8 +582,8 @@ export class AttachmentDownloader {
     this.emit({ type: 'pending', total: this.cellList.length, totalBytes: linkTotalBytes })
     this.emit({ type: 'info', message: `正在获取 ${this.cellList.length} 个附件的下载直链...` })
 
-    // 解析直链时控制并发（避免触发飞书接口限流）
-    const limit = Math.max(1, Math.min(this.config.concurrency || 6, 5))
+    // 解析直链时控制并发（提高并发上限以加快 ef2 生成；飞书有限流，故上限 15）
+    const limit = Math.max(1, Math.min(this.config.concurrency || 10, 15))
     await mapWithConcurrency(this.cellList, limit, async (cell) => {
       if (this.isCancelled()) {
         this.emitFileProgress(cell.order, cell.displayName, cell.size, 0, 'cancelled', '已取消')
@@ -628,6 +637,8 @@ export class AttachmentDownloader {
       this.config.viewId,
       selectedRecordIds
     )
+    // 缓存记录，供后续「确认导出」阶段复用，避免重复拉取
+    this.recordsCache = { key: JSON.stringify(selectedRecordIds ?? []), records }
     const totalRecords = records.length
     this.buildCells(records)
     if (this.cellList.length === 0) {

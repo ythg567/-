@@ -65,7 +65,7 @@ export const defaultForm: FormState = {
   keepBlankLine: false,
   ignoreEmptyField: false,
   emptyFieldHandling: 'ignore',
-  concurrency: 6,
+  concurrency: 10,
   downloadExecution: 'browser'
 }
 
